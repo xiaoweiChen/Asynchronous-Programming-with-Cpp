@@ -1,0 +1,154 @@
+std::async 返回的 Future 在调用其析构函数时的行为与从 Promise 获得的 Future 不同。当这些 Future 被销毁时，它们的 ~future 析构函数会被调用，其中 wait() 函数会被执行，从而导致创建时生成的线程加入。
+
+如果 std::async 使用的线程尚未加入，那么会增加一些开销，从而影响程序性能，因此我们需要了解未来对象何时超出范围，从而调用其析构函数。
+
+让我们通过几个简短的例子来了解这些未来是如何表现的，以及如何使用它们的一些建议。
+
+我们首先定义一个任务， func，它只是将其输入值乘以 2，并等待一段时间，模拟一个昂贵的操作：
+
+\begin{cpp}
+#include <chrono>
+#include <functional>
+#include <future>
+#include <iostream>
+#include <thread>
+
+#define sync_cout std::osyncstream(std::cout)
+
+using namespace std::chrono_literals;
+
+unsigned func(unsigned x) {
+    std::this_thread::sleep_for(10ms);
+    return 2 * x;
+}
+\end{cpp}
+
+为了测量代码块的性能，我们将异步运行多个任务（在此示例中为 NUM\_TASKS = 32），并使用 <chrono> 库中的稳定时钟测量运行时间。为此，我们只需使用以下命令记录表示任务启动当前时间点的时间点：
+
+\begin{cpp}
+auto start = std::chrono::high_resolution_clock::now();
+\end{cpp}
+
+我们可以在 main() 函数中定义以下 lambda 函数，在任务完成时调用该函数来获取持续时间（以毫秒为单位）：
+
+\begin{cpp}
+auto duration_from = [](auto start) {
+    auto dur = std::chrono::high_resolution_clock::now()
+                - start;
+    return std::chrono::duration_cast
+                <std::chrono::milliseconds>(dur).count();
+};
+\end{cpp}
+
+有了这个代码，我们就可以开始衡量未来的不同使用方法。
+
+让我们首先运行几个异步任务，但丢弃 std::async 返回的未来：
+
+\begin{cpp}
+constexpr unsigned NUM_TASKS = 32;
+
+auto start = std::chrono::high_resolution_clock::now();
+
+for (unsigned i = 0; i < NUM_TASKS; i++) {
+    std::async(std::launch::async, func, i);
+}
+
+std::cout << "Discarding futures: "
+          << duration_from(start) << '\n';
+\end{cpp}
+
+在我的 PC 上，此项测试的持续时间为 334 毫秒，我的 PC 是 Pentium i7 4790K， 4 GHz，四核八线程。
+
+对于下一个测试，让我们存储返回的未来，但不要等待结果准备好。显然，这不是通过产生异步任务来消耗资源而不是处理结果来使用计算机能力的正确方法，但我们这样做是为了测试和学习目的：
+
+\begin{cpp}
+start = std::chrono::high_resolution_clock::now();
+
+for (unsigned i = 0; i < NUM_TASKS; i++) {
+    auto fut = std::async(std::launch::async, func, i);
+}
+
+std::cout << "In-place futures: "
+          << duration_from(start) << '\n';
+\end{cpp}
+
+在这种情况下，持续时间仍为 334 毫秒。在这两种情况下，都会创建一个 Future，当在每次循环迭代结束时超出范围时，它必须等待 std::async 生成的线程完成并加入。
+
+如您所见，我们启动了 32 个任务，每个任务至少耗时 10 毫秒。总计 320 毫秒，相当于这些测试中获得的 334 毫秒。其余性能成本来自启动线程、检查 for 循环变量、存储使用稳定时钟时的时间点等。
+
+为了避免每次调用 std::async 时都创建一个新的 Future 对象，并等待其析构函数被调用，让我们重用 Future 对象，如下面的代码所示。同样，这不是正确的方法，因为我们放弃了对先前任务结果的访问：
+
+\begin{cpp}
+std::future<unsigned> fut;
+start = std::chrono::high_resolution_clock::now();
+for (unsigned i = 0; i < NUM_TASKS; i++) {
+    fut = std::async(std::launch::async, func, i);
+}
+
+std::cout << "Reusing future: "
+          << duration_from(start) << '\n';
+\end{cpp}
+
+现在持续时间为 166 毫秒。减少是因为不必等待每个未来，因为它们不会被销毁。
+
+但这并不理想，因为我们可能想知道异步任务的结果。因此，我们需要将结果存储在一个向量中。让我们修改前面的示例，使用 res 向量来存储每个任务的结果：
+
+\begin{cpp}
+std::vector<unsigned> res;
+
+start = std::chrono::high_resolution_clock::now();
+
+for (unsigned i = 0; i < NUM_TASKS; i++) {
+    auto fut = std::async(std::launch::async, func, i);
+    res.push_back(fut.get());
+}
+
+std::cout << "Reused future and storing results: "
+          << duration_from(start) << '\n';
+\end{cpp}
+
+在这种情况下，持续时间仍为 334 毫秒。在这两种情况下，都会创建一个 Future，当在每次循环迭代结束时超出范围时，它必须等待 std::async 生成的线程完成并加入。
+
+如您所见，我们启动了 32 个任务，每个任务至少耗时 10 毫秒。总计 320 毫秒，相当于这些测试中获得的 334 毫秒。其余性能成本来自启动线程、检查 for 循环变量、存储使用稳定时钟时的时间点等。
+
+为了避免每次调用 std::async 时都创建一个新的 Future 对象，并等待其析构函数被调用，让我们重用 Future 对象，如下面的代码所示。同样，这不是正确的方法，因为我们放弃了对先前任务结果的访问：
+
+\begin{cpp}
+std::vector<unsigned> res;
+std::vector<std::future<unsigned>> futsVec;
+
+start = std::chrono::high_resolution_clock::now();
+
+for (unsigned i = 0; i < NUM_TASKS; i++) {
+    futsVec.emplace_back(std::async(std::launch::async,
+                         func, i));
+}
+
+for (unsigned i = 0; i < NUM_TASKS; i++) {
+    res.push_back( futsVec[i].get() );
+}
+
+std::cout << "Futures vector and storing results: "
+          << duration_from(start) << '\n';
+\end{cpp}
+
+现在持续时间只有 22 毫秒！但为什么这是可能的呢？
+
+现在所有任务都真正异步运行。第一个循环启动所有任务并将 Future 存储在 futsVec 向量中。由于 Future 析构函数被调用，因此不再有任何等待期。
+
+第二个循环遍历 futsVec，检索每个结果，并将它们存储在结果向量 res 中。执行第二个循环的时间大约是遍历 res 向量所需的时间加上最慢任务的调度和执行时间。
+
+如果测试运行的系统有足够的线程来同时运行所有异步任务，那么运行时间可以减半。有些系统可以通过让调度程序决定运行哪些任务来自动管理后台的多个异步任务。在其他系统中，当尝试同时启动多个线程时，它们可能会通过引发异常来发出抱怨。在下一节中，我们将使用信号量实现线程限制器。
+
+
+
+
+
+
+
+
+
+
+
+
+

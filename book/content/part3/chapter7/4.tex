@@ -1,3 +1,106 @@
 
+使用 std::async 时不支持从异步任务到主线程的异常传播。为了启用异常传播，我们可能需要一个承诺对象来存储异常，稍后可以通过调用 std::async 返回的 Future 来访问该异常。但std::async 无法访问或提供该承诺对象。
 
-\mySubsubsection{7.4.1.}{Exceptions when calling std::async}
+实现此目的的一种可行方法是使用 std::packaged\_task 对象包装异步任务。但如果是这种情况，我们应该直接使用上一章中描述的打包任务。
+
+我们还可以使用自 C++11 起可用的嵌套异常，方法是使用 std::nested\_exception，这是一个可以捕获和存储当前异常的多态混合类，允许任意类型的嵌套异常。从 std::nested\_exception 对象中，我们可以使用 nested\_ptr() 方法检索存储的异常，或通过调用 rethrow\_nested() 重新抛出它。
+
+要创建嵌套异常，我们可以使用 std::throw\_with\_nested() 方法抛出异常。如果我们只想在异常嵌套时重新抛出异常，我们可以使用 std::rethrow\_if\_nested()。所有这些函数都在 <exception> 标头中定义。
+
+使用所有这些函数，我们可以实现以下示例，其中异步任务抛出 std::runtime\_error 异常，该异常在异步任务的主体中被捕获并作为嵌套异常重新抛出。然后，此嵌套异常对象在主函数中再次被捕获，并打印出异常序列，如以下代码所示：
+
+\begin{cpp}
+#include <exception>
+#include <future>
+#include <iostream>
+#include <stdexcept>
+#include <string>
+
+void print_exceptions(const std::exception& e,
+                      int level = 1) {
+    auto indent = std::string(2 * level, ‹ ‹);
+    std::cerr << indent << e.what() << '\n';
+    try {
+        std::rethrow_if_nested(e);
+    } catch (const std::exception& nestedException) {
+        print_exceptions(nestedException, level + 1);
+    } catch (...) { }
+}
+
+void func_throwing() {
+    throw std::runtime_error(
+    "Exception in func_throwing");
+}
+
+int main() {
+    auto fut = std::async([]() {
+        try {
+            func_throwing();
+        } catch (...) {
+            std::throw_with_nested(
+                std::runtime_error(
+                    "Exception in async task."));
+        }
+    });
+
+    try {
+        fut.get();
+    } catch (const std::exception& e) {
+        std::cerr << "Caught exceptions:\n";
+        print_exceptions(e);
+    }
+    return 0;
+}
+\end{cpp}
+
+正如我们在示例中看到的，创建了一个异步任务，该任务在 try-catch 块内执行 func\_throwin g() 函数。此函数仅抛出一个 std::runtime\_error 异常，该异常被捕获，然后通过使用 std::throw\_with\_nested() 函数作为 std::nested\_exception 类的一部分重新抛出。稍后，在主线程中，当我们尝试通过调用其 get() 方法从 fut future 对象中检索结果时，嵌套异常被抛出并在主 tr y-catch 块中再次捕获，其中 print\_exceptions() 函数被调用，并使用捕获的嵌套异常作为参数。
+
+print\_exceptions() 函数打印当前异常（e.what()）的原因，如果嵌套则重新抛出异常，从而再次捕获它并按嵌套级别缩进递归打印异常原因。
+
+由于每个异步任务都有自己的未来，程序可以分别处理来自多个任务的异常。
+
+\mySubsubsection{7.4.1.}{调用 std::async 时发生异常}
+
+除了异步任务中发生的异常之外，还存在 std::async 可能抛出异常的情况。这些异常如下：
+
+\begin{itemize}
+\item
+std::bad\_alloc：如果没有足够的内存来存储 std::async 所需的内部数据结构。
+
+\item
+std:system\_error：如果在使用 std::launch::async 作为启动策略时无法启动新线程。在这种情况下，错误条件将是 std::errc::resource\_unavailable\_try\_again。根据实现，如果策略是默认策略，它可能会回退到延迟调用或实现定义的策略。
+\end{itemize}
+
+大多数情况下，这些异常是由于资源耗尽而引发的。一种解决方案是，当当前正在运行的一些异步任务完成并释放其资源后，稍后重试。另一种更可靠的解决方案是限制在给定时间内运行的异步任务数量。我们将很快实现此解决方案，但首先，让我们了解 std::async 返回的 Future，以及如何在处理它们时实现更好的性能。
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

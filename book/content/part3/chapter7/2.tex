@@ -1,5 +1,236 @@
-\mySubsubsection{7.2.1.}{Launching an asynchronous task}
 
-\mySubsubsection{7.2.2.}{Passing values}
+std::async 是 C++ 中的一个函数模板，由 C++ 标准在 <future> 标头中引入，作为 C++11 线程支持库的一部分。它用于异步运行函数，允许主线程（或其他线程）继续并发运行。
 
-\mySubsubsection{7.2.3.}{Returning values}
+总而言之， std::async 是 C++ 中用于异步编程的强大工具，可以更轻松地并行运行任务并有效地管理其结果。
+
+\mySubsubsection{7.2.1.}{启动异步任务}
+
+要使用 std::async 异步执行函数，我们可以使用与第 3 章启动线程时相同的方法，但使用不同的可调用对象。
+
+一种方法是使用函数指针：
+
+\begin{cpp}
+void func() {
+    std::cout << "Using function pointer\n";
+}
+auto fut1 = std::async(func);
+\end{cpp}
+
+另一种方法是使用 lambda 函数：
+
+\begin{cpp}
+auto lambda_func = []() {
+    std::cout << "Using lambda function\n";
+};
+auto fut2 = std::async(lambda_func);
+\end{cpp}
+
+我们还可以使用嵌入的 lambda 函数：
+
+\begin{cpp}
+auto fut3 = std::async([]() {
+    std::cout << "Using embedded lambda function\n";
+});
+\end{cpp}
+
+我们可以使用 operator() 重载的函数对象：
+
+\begin{cpp}
+class FuncObjectClass {
+    public:
+    void operator()() {
+        std::cout << "Using function object class\n";
+    }
+};
+auto fut4 = std::async(FuncObjectClass());
+\end{cpp}
+
+我们可以使用非静态成员函数通过传递成员函数的地址和对象的地址来调用成员函数：
+
+\begin{cpp}
+class Obj {
+    public:
+    void func() {
+        std::cout << "Using a non-static member function"
+        << std::endl;
+    }
+};
+Obj obj;
+auto fut5 = std::async(&Obj::func, &obj);
+\end{cpp}
+
+我们还可以使用静态成员函数，由于方法是静态的，因此只需要成员函数的地址：
+
+\begin{cpp}
+class Obj {
+    public:
+    static void static_func() {
+        std::cout << "Using a static member function"
+        << std::endl;
+    }
+};
+auto fut6 = std::async(&Obj::static_func);
+\end{cpp}
+
+当调用 std::async 时，它会返回一个未来，其中会存储函数的结果，就像我们在上一章中所学到的一样。
+
+\mySubsubsection{7.2.2.}{传递值}
+
+同样，与我们在创建线程时传递参数类似，参数可以通过值、引用或指针传递给线程。
+
+在这里，我们可以看到如何通过值传递参数：
+
+\begin{cpp}
+void funcByValue(const std::string& str, int val) {
+    std::cout << «str: « << str << «, val: « << val
+              << std::endl;
+}
+std::string str{"Passing by value"};
+auto fut1 = async(funcByValue, str, 1);
+\end{cpp}
+
+按值传递意味着会创建一个临时对象并将参数值复制到其中。这可以避免数据竞争，但成本更高。
+
+下一个示例显示如何通过引用传递值：
+
+\begin{cpp}
+void modifyValues(std::string& str) {
+    str += " (Thread)";
+}
+std::string str{"Passing by reference"};
+auto fut2 = std::async(modifyValues, std::ref(str));
+\end{cpp}
+
+我们还可以将值作为 const 引用传递：
+
+\begin{cpp}
+void printVector(const std::vector<int>& v) {
+    std::cout << "Vector: ";
+    for (int num : v) {
+        std::cout << num << " ";
+    }
+    std::cout << std::endl;
+}
+std::vector<int> v{1, 2, 3, 4, 5};
+auto fut3 = std::async(printVector, std::cref(v));
+\end{cpp}
+
+引用传递是通过使用 std::ref()（非常量引用）或 std::cref()（常量引用）来实现的，这两个函数均定义在 < functional> 头文件中，让定义线程构造函数的可变参数模板（支持任意数量参数的类或函数模板）将参数视为引用。传递参数时缺少这些函数意味着按值传递参数，这意味着进行复制，如前所述，这会使函数调用成本更高。
+
+您还可以将对象移动到由 std::async 创建的线程中，如下所示：
+
+\begin{cpp}
+auto fut4 = std::async(printVector, std::move(v));
+\end{cpp}
+
+注意，向量v在其内容被移动后，处于有效但空的状态。
+
+最后，我们还可以通过 lambda 捕获传递值：
+
+\begin{cpp}
+std::string str5{"Hello"};
+auto fut5 = std::async([&]() {
+    std::cout << "str: " << str5 << std::endl;
+});
+\end{cpp}
+
+在此示例中， str 变量被 std::async 执行的 lambda 函数作为引用访问。
+
+\mySubsubsection{7.2.3.}{返回值}
+
+当调用 std:async 时，它会立即返回一个未来，它将保存函数或可调用对象将计算的值，就像我们在上一章使用承诺和未来时看到的那样。
+
+在前面的例子中，我们根本没有使用 std::async 返回的对象。让我们重写第 6 章打包任务部分的最后一个示例，其中我们使用 std::packaged\_task 对象来计算两个值的幂。但在本例中，我们将使用 std::async 生成几个异步任务来计算这些值，等待任务完成，存储结果，最后在控制台中显示它们：
+
+\begin{cpp}
+#include <chrono>
+#include <cmath>
+#include <future>
+#include <iostream>
+#include <thread>
+#include <vector>
+#include <syncstream>
+
+#define sync_cout std::osyncstream(std::cout)
+
+using namespace std::chrono_literals;
+
+int compute(unsigned taskId, int x, int y) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(
+                                rand() % 200));
+    sync_cout << "Running task " << taskId << '\n';
+    return std::pow(x, y);
+}
+
+int main() {
+    std::vector<std::future<int>> futVec;
+    for (int i = 0; i <= 10; i++)
+        futVec.emplace_back(std::async(compute,
+                            i+1, 2, i));
+
+    sync_cout << "Waiting in main thread\n";
+    std::this_thread::sleep_for(1s);
+
+    std::vector<int> results;
+    for (auto& fut : futVec)
+        results.push_back(fut.get());
+
+    for (auto& res : results)
+        std::cout << res << ' ';
+    std::cout << std::endl;
+    return 0;
+}
+\end{cpp}
+
+compute() 函数仅获取两个数字 x 和 y，并计算 x y 。它还获取一个代表任务标识符的数字，并等待最多两秒钟，然后在控制台中打印消息并计算结果。
+
+在 main() 函数中，主线程启动几个任务来计算一系列 2 的幂值。调用 std::async 返回的 Future 存储在 futVec 向量中。然后，主线程等待一秒钟，模拟一些工作。最后，我们遍历 futVe c 向量并在每个 Future 元素中调用 get() 函数，从而等待该特定任务完成并返回一个值，然后将返回的值存储在另一个名为 results 的向量中。然后，我们在退出程序之前打印 results 向量的内容。
+
+这是运行该程序时的输出：
+
+\begin{shell}
+Waiting in main thread
+Running task 11
+Running task 9
+Running task 2
+Running task 8
+Running task 4
+Running task 6
+Running task 10
+Running task 3
+Running task 1
+Running task 7
+Running task 5
+1 2 4 8 16 32 64 128 256 512 1024
+\end{shell}
+
+我们可以看到，每个任务完成所需的时间不同，因此输出不是按任务标识符排序的。但是，当我们按顺序遍历 futVec 向量获取结果时，这些结果会按顺序显示。
+
+现在我们已经了解了如何启动异步任务并传递参数和返回值，让我们学习如何使用启动策略来控制执行方法。
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

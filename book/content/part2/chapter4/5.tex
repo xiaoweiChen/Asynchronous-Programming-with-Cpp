@@ -1,0 +1,110 @@
+条件变量是 C++ 标准库提供的另一个同步原语。它们允许多个线程相互通信。它们还允许多个线程等待来自另一个线程的通知。条件变量始终与互斥锁相关联。
+
+在以下示例中，线程必须等待计数器等于某个值：
+
+\begin{cpp}
+#include <chrono>
+#include <condition_variable>
+#include <iostream>
+#include <mutex>
+#include <thread>
+#include <vector>
+
+int counter = 0;
+
+int main() {
+    using namespace std::chrono_literals;
+
+    std::mutex mtx;
+    std::mutex cout_mtx;
+    std::condition_variable cv;
+
+    auto increment_counter = [&] {
+        for (int i = 0; i < 20; ++i) {
+            std::this_thread::sleep_for(100ms);
+            mtx.lock();
+            ++counter;
+            mtx.unlock();
+            cv.notify_one();
+        }
+    };
+
+    auto wait_for_counter_non_zero_mtx = [&] {
+        mtx.lock();
+        while (counter == 0) {
+            mtx.unlock();
+            std::this_thread::sleep_for(10ms);
+            mtx.lock();
+        }
+        mtx.unlock();
+        std::lock_guard<std::mutex> cout_lck(cout_mtx);
+        std::cout << "Counter is non-zero" << std::endl;
+    };
+
+    auto wait_for_counter_10_cv = [&] {
+        std::unique_lock<std::mutex> lck(mtx);
+        cv.wait(lck, [] { return counter == 10; });
+
+        std::lock_guard<std::mutex> cout_lck(cout_mtx);
+        std::cout << "Counter is: " << counter << std::endl;
+    };
+
+    std::thread t1(wait_for_counter_non_zero_mtx);
+    std::thread t2(wait_for_counter_10_cv);
+    std::thread t3(increment_counter);
+
+    t1.join();
+    t2.join();
+    t3.join();
+
+    return 0;
+}
+\end{cpp}
+
+等待某个条件有两种方式：一种是循环等待，并使用互斥锁作为同步机制。这是在 wait\_for\_counter\_non\_zero\_mtx 中实现的。该函数获取锁，读取 counter 中的值，然后释放锁。然后，它休眠 10 毫秒，然后再次获取锁。这是在 while 循环中完成的，直到 counter 非零。
+
+条件变量帮助我们简化了前面的代码。 wait\_for\_counter\_10\_cv 函数会等待直到计数器等于 1 0。线程将等待 cv 条件变量，直到它被 t1 通知，线程会循环增加计数器。
+
+wait\_for\_counter\_10\_cv 函数的工作方式如下：条件变量 cv 等待互斥锁 mtx。调用 wait() 后，条件变量锁定互斥锁并等待，直到条件为真（条件在作为第二个参数传递给 wait 函数的 l ambda 中实现）。如果条件不为真，条件变量将保持等待状态，直到收到信号并释放互斥锁。一旦满足条件，条件变量将结束其等待状态并再次锁定互斥锁以同步其对计数器的访问。
+
+一个重要问题是，条件变量可能由不相关的线程发出信号。这称为虚假唤醒。为了避免因虚假唤醒而导致错误，在等待时会检查条件。当条件变量发出信号时，会再次检查条件。
+
+如果发生虚假唤醒且计数器为零（条件检查返回 false），则等待将恢复。
+
+另一个线程通过运行increment\_counter来增加计数器。一旦计数器具有所需的值（在本例中，该值为10），它就会向等待线程条件变量发出信号。
+
+有两个函数用于向条件变量发送信号：
+
+\begin{itemize}
+\item
+cv.notify\_one()：仅向其中一个等待线程发送信号
+
+\item
+cv.notify\_all()：向所有等待线程发出信号
+\end{itemize}
+
+在本节中，我们介绍了条件变量，并看到了使用条件变量进行同步的简单示例，以及在某些情况下它如何简化同步/等待代码。现在，让我们将注意力转向使用互斥锁和两个条件变量实现同步队列。
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

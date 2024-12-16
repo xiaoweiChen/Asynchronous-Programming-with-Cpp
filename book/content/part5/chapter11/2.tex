@@ -1,7 +1,285 @@
 
+让我们从一个简单但有用的方法开始，以了解软件程序在执行时的作用——记录日志。
 
-\mySubsubsection{11.2.1.}{How to select a third-party library}
+日志记录是保存程序中发生的事件日志的过程，通过使用消息记录程序的执行方式来存储信息，跟踪其流程，并帮助识别问题和错误。
 
-\mySubsubsection{11.2.2.}{Some relevant logging libraries}
+大多数基于 Unix 的日志系统都使用标准协议 syslog，该协议由 Eric Altman 于 1980 年作为Sendmail 项目的一部分创建。此标准协议定义了生成日志消息的软件、存储日志消息的系统以及报告和分析这些日志事件的软件之间的界限。
 
-\mySubsubsection{11.2.3.}{Logging a deadlock – an example}
+每条日志消息都包含一个设施代码和一个严重性级别。设施代码标识了产生特定日志消息的系统类型（用户级、内核、系统、网络等），严重性级别描述了系统的状况，表明了处理特定问题的紧急程度，严重性级别包括紧急、警报、严重、错误、警告、通知、信息和调试。
+
+大多数日志系统或记录器为日志消息提供了各种目的地或接收器：控制台、稍后可以打开和分析的文件、远程系统日志服务器或中继以及其他目的地。
+
+日志记录在没有调试器的地方很有用，正如我们稍后会看到的，特别是在分布式、多线程、实时、科学或以事件为中心的应用程序中，使用调试器检查数据或跟踪程序流程可能会成为一项繁琐的任务。
+
+日志库通常还提供线程安全的单例类，允许多线程和异步写入日志文件，有助于日志轮换，通过动态创建新的日志文件来避免日志文件过大而不会丢失日志事件以及时间戳，以便更好地跟踪日志事件发生的时间。
+
+与实现我们自己的多线程日志系统相比，更好的方法是使用一些经过充分测试和记录的可用于生产的库。
+
+\mySubsubsection{11.2.1.}{如何选择第三方库}
+
+在选择日志库（或任何其他库）时，我们需要在将其集成到我们的软件之前调查以下几点，以避免将来出现问题：
+
+\begin{itemize}
+\item
+支持：库是否定期更新和升级？库是否有社区或活跃的生态系统可以帮助解决可能出现的任何问题？社区是否乐意使用库？
+
+\item
+质量：是否有公开的错误报告系统？错误报告是否得到及时处理，提供解决方案并修复库中的错误？它是否支持最新的编译器版本并支持最新的 C++ 功能？
+
+\item
+安全性：该库或其任何依赖库是否有任何报告的漏洞？
+
+\item
+许可证：库许可证是否符合我们的开发和产品需求？费用是否可以承受？
+\end{itemize}
+
+对于复杂的系统，可能值得考虑使用集中式系统来收集和生成日志报告或仪表板，例如 Sen try（\url{https://sentry.io}）或 Logstash（\url{https://www.elastic.co/logstash}），它们可以收集、解析和转换日志，并且可以与其他工具集成，例如 Graylog（\url{https://graylog.org}）、 Grafana（\url{https://grafana.com}）或 Kibana（\url{https://www.elastic.co/kibana}）。
+
+下一节介绍一些有趣的日志库。
+
+\mySubsubsection{11.2.2.}{一些相关的日志库}
+
+市场上有许多日志库，每个库都涵盖一些特定的软件要求。根据程序约束和需求，以下某个库可能比其他库更合适。
+
+在第 9 章中，我们探索了 Boost.Asio。 Boost 还提供了另一个库 Boost.Log（\url{https://github.com/boostorg/log}），这是一个功能强大且可配置的日志库。
+
+Google 还提供了许多开源库，其中包括 Google 日志库 glog（\url{https://github.com/google/glog} ），它是一个提供 C++ 风格的流 API 和帮助宏的 C++14 库。
+
+如果开发人员熟悉 Java，那么一个很好的选择就是 Apache Log4cxx（\url{https://logging.apache.org/log4cxx}），它基于 Log4j（\url{https://logging.apache.org/log4j}），这是一个多功能、工业级的 Java 日志框架。
+
+其他值得考虑的日志库如下：
+
+\begin{itemize}
+\item
+spdlog (\url{https://github.com/gabime/spdlog}) 是一个有趣的日志库，我们可以将其与 \{fmt\} 库一起使用。此外，程序可以从启动时开始记录消息并将它们排队，甚至在指定日志输出文件名之前。
+
+\item
+uill (\url{https://github.com/odygrd/quill}) 是一个异步低延迟 C++ 日志库。
+
+\item
+NanoLog (\url{https://github.com/PlatformLab/NanoLog}) 是一个具有类似 printf API 的纳秒级日志系统。
+
+\item
+lwlog (\url{https://github.com/ChristianPanov/lwlog}) 是一个非常快的异步 C++17 日志库。
+
+\item
+XTR (\url{https://github.com/choll/xtr}) 是一个快速便捷的 C++ 日志库，适用于低延迟和实时环境。
+
+\item
+Reckless (\url{https://github.com/mattiasflodin/reckless}) 是一个低延迟、高吞吐量的日志库。
+
+\item
+uberlog (\url{https://github.com/IMQS/uberlog}) 是一个跨平台、多进程的 C++ 日志系统。
+
+\item
+Easylogging++ (\url{https://github.com/abumq/easyloggingpp}) 是一个单头 C++ 日志库，具有编写我们自己的接收器和跟踪性能的能力。
+
+\item
+tracetool (\url{https://github.com/froglogic/tracetool}) 是一个日志记录和跟踪共享库。
+\end{itemize}
+
+作为指导原则，根据要开发的系统，我们可能会选择以下库之一：
+
+\begin{itemize}
+\item
+对于低延迟或实时系统： Quill、 XTR 或 Reckless
+
+\item
+实现纳秒级高性能记录： NanoLog
+
+\item
+对于异步日志记录： Quill 或 lwlog
+
+\item
+对于跨平台、多进程应用程序： uberlog
+
+\item
+对于简单灵活的日志记录： Easylogging++ 或 glog
+
+\item
+熟悉 Java 日志记录： Log4cxx
+\end{itemize}
+
+所有库都有优点，但也有缺点，在选择要包含在系统中的库之前需要进行调查。下表总结了这些要点：
+
+% Please add the following required packages to your document preamble:
+% \usepackage{longtable}
+% Note: It may be necessary to compile the document several times to get a multi-page table to line up properly
+\begin{longtable}{|l|l|l|}
+\hline
+\textbf{库}    & \textbf{优点}         & \textbf{缺点}               \\ \hline
+\endfirsthead
+%
+\endhead
+%
+spdlog        & 易于集成、关注性能、可定制       & 缺乏一些高级功能来满足极低延迟需求         \\ \hline
+Quill         & 低延迟系统中的高性能          & 与更简单的同步记录器相比，设置更复杂        \\ \hline
+NanoLog       & 速度一流，性能优化           & 特征有限的；适合于专门的用例            \\ \hline
+lwlog         & 轻量级，有利于快速集成         & 不成熟和功能丰富的替代品              \\ \hline
+XTR           & 非常高效，用户友好的界面        & 更适合于特定的实时应用程序             \\ \hline
+Reckless      & 高度优化的吞吐量和低延迟        & 与更通用的记录器相比，灵活性有限          \\ \hline
+uberlog       & 非常适合多进程和分布式系统       & 不如专门的低延迟记录器快              \\ \hline
+Easylogging++ & 易于使用，可定制的输出汇        & 性能优化不如其他一些库               \\ \hline
+tracetool     & 在一个库中结合日志记录和跟踪      & 不关注低延迟或高吞吐量               \\ \hline
+Boost.Log     & 多功能，与Boost库很好地集成    & 更高的复杂性;对于简单的日志记录需求是否会过度使用 \\ \hline
+glog          & 使用简单，适合需要简单api的项目   & 功能不够丰富，无法进行高级定制           \\ \hline
+Log4cxx       & 可靠的，经过时间考验的，工业强度的记录 & 更复杂的设置，特别是对于较小的项目         \\ \hline
+\end{longtable}
+
+\begin{center}
+表 11.1：各种库的优缺点
+\end{center}
+
+请访问日志库的网站以更好地了解它们提供的功能并比较它们之间的性能。
+
+由于 spdlog 是 GitHub 上 fork 次数最多、加星最多的 C++ 日志库存储库，因此在下一节中，我们将实现一个使用该库捕获竞争条件的示例。
+
+\mySubsubsection{11.2.3.}{记录死锁——示例}
+
+在实现这个示例之前，我们需要安装 spdlog 和 \{fmt\} 库。 \{fmt\} (\url{https://github.com/fmtlib/fmt} ) 是一个开源格式化库，为 C++ IOStreams 提供了一种快速、安全的替代方案。
+
+请检查其文档并根据您的平台进行安装步骤。
+
+让我们实现一个发生死锁的示例。正如我们在第 4 章中学到的，当两个或多个线程需要获取多个互斥锁才能执行其工作时，就会发生死锁。如果互斥锁的获取顺序不同，则一个线程可以获取一个互斥锁并永远等待另一个线程获取另一个互斥锁。
+
+在此示例中，两个线程需要获取两个互斥锁 mtx1 和 mtx2，以增加 counter1 和 counter2 计数器的值并交换它们的值。由于线程获取互斥锁的顺序不同，因此可能会发生死锁。
+
+让我们首先包含所需的库：
+
+\begin{cpp}
+#include <fmt/core.h>
+#include <spdlog/sinks/basic_file_sink.h>
+#include <spdlog/sinks/stdout_color_sinks.h>
+#include <spdlog/spdlog.h>
+
+#include <chrono>
+#include <iostream>
+#include <mutex>
+#include <thread>
+
+using namespace std::chrono_literals;
+\end{cpp}
+
+在 main() 函数中，我们定义计数器和互斥锁：
+
+\begin{cpp}
+uint32_t counter1{};
+std::mutex mtx1;
+
+uint32_t counter2{};
+std::mutex mtx2;
+\end{cpp}
+
+在生成线程之前，让我们设置一个多接收器记录器，该记录器可以同时将日志消息写入控制台和日志文件。我们还将其日志级别设置为调试，使记录器发布所有严重性级别大于调试的日志消息，以及由时间戳、线程标识符、日志级别和日志消息组成的每行日志的格式：
+
+\begin{cpp}
+auto console_sink = std::make_shared<
+            spdlog::sinks::stdout_color_sink_mt>();
+console_sink->set_level(spdlog::level::debug);
+
+auto file_sink = std::make_shared<
+            spdlog::sinks::basic_file_sink_mt>("logging.log",
+                                                true);
+file_sink->set_level(spdlog::level::info);
+
+spdlog::logger logger("multi_sink",
+        {console_sink, file_sink});
+
+logger.set_pattern(
+            "%Y-%m-%d %H:%M:%S.%f - Thread %t [%l] : %v");
+logger.set_level(spdlog::level::debug);
+\end{cpp}
+
+我们还声明了一个 increase\_and\_swap lambda 函数，它增加两个计数器的值并交换它们：
+
+\begin{cpp}
+auto increase_and_swap = [&]() {
+    logger.info("Incrementing both counters...");
+    counter1++;
+    counter2++;
+
+    logger.info("Swapping counters...");
+    std::swap(counter1, counter2);
+};
+\end{cpp}
+
+两个 worker lambda 函数， worker1 和 worker2，在退出前获取两个互斥锁并调用 increase\_and\_swap()。由于使用了锁保护 (std::lock\_guard) 对象，因此在析构期间离开 worker lambda 函数时会释放互斥锁：
+
+\begin{cpp}
+auto worker1 = [&]() {
+    logger.debug("Entering worker1");
+
+    logger.info("Locking mtx1...");
+    std::lock_guard<std::mutex> lock1(mtx1);
+    logger.info("Mutex mtx1 locked");
+
+    std::this_thread::sleep_for(100ms);
+
+    logger.info("Locking mtx2...");
+    std::lock_guard<std::mutex> lock2(mtx2);
+    logger.info("Mutex mtx2 locked");
+
+    increase_and_swap();
+
+    logger.debug("Leaving worker1");
+};
+
+auto worker2 = [&]() {
+    logger.debug("Entering worker2");
+
+    logger.info("Locking mtx2...");
+    std::lock_guard<std::mutex> lock2(mtx2);
+    logger.info("Mutex mtx2 locked");
+
+    std::this_thread::sleep_for(100ms);
+
+    logger.info("Locking mtx1...");
+
+    std::lock_guard<std::mutex> lock1(mtx1);
+    logger.info("Mutex mtx1 locked");
+
+    increase_and_swap();
+
+    logger.debug("Leaving worker2");
+};
+
+logger.debug("Starting main function...");
+
+std::thread t1(worker1);
+std::thread t2(worker2);
+
+t1.join();
+t2.join();
+\end{cpp}
+
+这两个 worker lambda 函数类似，但略有不同： worker1 先获取 mutex1，然后获取 mutex2，而 worker2 则遵循相反的顺序，先获取 mutex2，然后获取 mutex1。在两个互斥锁获取之间有一个休眠期，以让另一个线程获取其互斥锁，因此，由于 worker1 将获取 mutex1，而 wor ker2 将获取 mutex2，因此会引发死锁。
+
+然后，在睡眠之后， worker1 将尝试获取互斥锁 2，而 worker2 也将尝试获取互斥锁 1，但它们都不会成功，并会永远陷入死锁状态。
+
+运行此代码时的输出如下：
+
+\begin{shell}
+2024-09-04 23:39:54.484005 - Thread 38984 [debug] : Starting main
+function...
+2024-09-04 23:39:54.484106 - Thread 38985 [debug] : Entering worker1
+2024-09-04 23:39:54.484116 - Thread 38985 [info] : Locking mtx1...
+2024-09-04 23:39:54.484136 - Thread 38986 [debug] : Entering worker2
+2024-09-04 23:39:54.484151 - Thread 38986 [info] : Locking mtx2...
+2024-09-04 23:39:54.484160 - Thread 38986 [info] : Mutex mtx2 locked
+2024-09-04 23:39:54.484146 - Thread 38985 [info] : Mutex mtx1 locked
+2024-09-04 23:39:54.584250 - Thread 38986 [info] : Locking mtx1...
+2024-09-04 23:39:54.584255 - Thread 38985 [info] : Locking mtx2...
+\end{shell}
+
+检查日志时要注意的第一个症状是程序从未完成，因此可能陷入死锁。
+
+从记录器输出中，我们可以看到 t1（线程 38985）正在运行 worker1，而 t2（线程 38986） 正在运行 worker2。 t1 一进入 worker1，它就获取 mtx1。但是，一旦 worker2 启动， t2 就会获取 mtx2 互斥锁。然后，两个线程都等待 100 毫秒并尝试获取另一个互斥锁，但均未成功，程序仍处于阻塞状态。
+
+日志记录在生产系统中必不可少，但如果滥用，则会造成一定的性能损失，而且大多数情况下需要人工干预来调查问题。作为日志详细程度和性能损失之间的折衷，人们可以选择实现不同的日志记录级别，并仅在正常运行期间记录主要事件，同时仍保留在需要时提供极其详细的日志（如果选择）的能力。在开发周期的早期检测代码错误的更自动化的方法是使用测试和代码清理器，我们将在下一章中学习。
+
+并非所有错误都能被检测到，因此通常使用调试器来追踪和修复软件中的错误。接下来让我们学习如何调试多线程和异步代码。
+
+
+
+
+

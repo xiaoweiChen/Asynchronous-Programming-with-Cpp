@@ -1,7 +1,206 @@
-\mySubsubsection{5.6.1.}{Why do we use a power of 2 buffer size?}
 
-\mySubsubsection{5.6.2.}{Buffer access synchronization}
+我们已经了解了 C++ 标准库的原子特性，例如原子类型和操作以及内存模型和排序。现在我们将看到一个使用原子实现 SPSC 无锁队列的完整示例。
 
-\mySubsubsection{5.6.3.}{Pushing elements into the queue}
+这个队列的主要特点如下：
 
-\mySubsubsection{5.6.4.}{Popping elements from the queue}
+\begin{itemize}
+\item
+SPSC：此队列设计为使用两个线程工作，一个线程将元素推送到队列，另一个线程从
+队列中获取元素。
+
+\item
+有界：此队列具有固定大小。我们需要一种方法来检查队列何时达到其容量以及何时没
+有元素。
+
+\item
+无锁：此队列使用在现代 Intel x64 CPU 上始终无锁的原子类型。
+\end{itemize}
+
+在开始开发队列之前，请记住无锁与无等待不同（还请记住无等待并不能完全消除等待； 它只是确保每个队列推送/弹出所需的步骤数有限制）。第 13 章将讨论一些主要影响性能的方面。在该章中，我们还将优化队列的性能。目前，在本章中，我们将构建一个正确且性能良好的 SPSC 无锁队列——我们将在后面展示如何提高其性能。
+
+我们在第 4 章中使用互斥锁和条件变量创建了一个 SPSC 队列，消费者线程和生产者线程可以安全访问该队列。本章将使用原子操作来实现相同的目标。
+我们将使用相同的数据结构 std::vector<T> 来存储队列中的项目，其大小固定，即 2 的幂。
+
+这样，我们可以提高性能并快速找到下一个头和尾索引，而无需使用需要除法指令的模数运算符。当使用无锁原子类型来获得更好的性能时，我们需要注意影响性能的一切。
+
+\mySubsubsection{5.6.1.}{为什么我们使用2的幂的缓冲区大小？}
+
+我们将使用一个向量来保存队列项。该向量将具有固定大小，例如 N。我们将使向量的行为类似于环形缓冲区，这意味着访问向量中元素的索引将在结束后循环回到开头。第一个元素将跟在最后一个元素后面。正如我们在第 4 章中学到的，我们可以使用模运算符来做到这一点：
+
+\begin{cpp}
+size_t next_index = (curr_index + 1) % N;
+\end{cpp}
+
+例如，如果大小为 4 个元素，则下一个元素的索引将按照上述代码计算。对于最后一个索引，我们有以下代码：
+
+\begin{cpp}
+next_index = (3 + 1) % 4 = 4 % 4 = 0;
+\end{cpp}
+
+因此，正如我们所说，向量将是一个环形缓冲区，因为在最后一个元素之后，我们将返回到第一个元素，然后是第二个元素，依此类推。
+
+我们可以使用此方法获取任何缓冲区大小 N 的下一个索引。但为什么我们只使用 2 的幂的大小？答案很简单：性能。模数 (\%) 运算符需要除法指令，这很昂贵。当大小 N 是 2 的幂时，我们可以执行以下操作：
+
+\begin{cpp}
+size_t next_index = curr_index & (N – 1);
+\end{cpp}
+
+这比使用模运算符要快得多。
+
+\mySubsubsection{5.6.2.}{缓冲区访问同步}
+
+要访问队列缓冲区，我们需要两个索引：
+
+\begin{itemize}
+\item
+head：当前要读取的元素的索引
+
+\item
+tail：下一个要写入的元素的索引
+\end{itemize}
+
+消费者线程将使用头部索引进行读写。生产者线程将使用尾部索引进行读写。我们需要同步对这些变量的访问，因为：
+
+\begin{itemize}
+\item
+只有一个线程（消费者）写入 head，这意味着它可以以宽松的内存顺序读取它，因为它始终看到自己的更改。读取 tail 由读取器线程完成，它需要与生产者对 tail 的写入同步，因此它需要获取内存顺序。我们可以对所有事情使用顺序一致性，但我们想要最好的性能。当消费者线程写入 head 时，它需要与生产者对它的读取同步，因此它需要释放内存顺序。
+
+\item
+对于 tail，只有生产者线程会写入它，因此我们可以使用宽松的内存顺序来读取它，但我们需要释放内存顺序来写入它，并将其与消费者线程的读取同步。为了与消费者线程的写入同步，我们需要获取内存顺序来读取 head。
+\end{itemize}
+
+队列类的成员变量如下：
+
+\begin{cpp}
+const std::size_t capacity_; // power of two buffer size
+std::vector<T> buffer_; // buffer to store queue items handled like a
+ring buffer
+std::atomic<std::size_t> head_{ 0 };
+std::atomic<std::size_t> tail_{ 0 };
+\end{cpp}
+
+在本节中，我们了解了如何同步对队列缓冲区的访问。
+
+\mySubsubsection{5.6.3.}{将元素推送到队列}
+
+一旦我们决定了队列的数据表示以及如何同步对其元素的访问，让我们实现将元素推送到队列的函数：
+
+\begin{cpp}
+bool push(const T& item) {
+    std::size_t tail =
+        tail_.load(std::memory_order_relaxed);
+
+    std::size_t next_tail =
+        (tail + 1) & (capacity_ - 1);
+
+    if (next_tail != head_.load(std::memory_order_acquire)) {
+        buffer_[tail] = item;
+        tail_.store(next_tail, std::memory_order_release);
+        return true;
+    }
+
+    return false;
+}
+\end{cpp}
+
+当前尾部索引，即数据项（如果可能）被推送到队列的缓冲区槽，在行 [1] 中被原子读取。
+如前所述，此读取可以使用 std::memory\_order\_relaxed，因为只有生产者线程会更改此变量，并且它是唯一调用推送的线程。
+
+行 [2] 计算下一个索引模容量（记住缓冲区是一个环）。我们需要这样做来检查队列是否已满。
+
+我们在行 [3] 中执行检查。我们首先使用 std::memory\_order\_acquire 原子地读取 head 的当前值，因为我们希望生产者线程观察消费者线程对此变量所做的修改。然后我们将其值与下一个 head 索引进行比较。
+
+如果下一个尾部值等于当前头值，那么（按照我们的惯例）队列已满，我们返回 false。
+如果队列未满，行 [4] 将数据项复制到队列缓冲区。这里值得一提的是，数据复制不是原子的。
+行 [5] 原子地将新的尾部索引值写入 tail\_。然后，使用 std::memory\_order\_release 使更改对使用 std::memory\_order\_acquire 原子地读取此变量的消费者线程可见。
+
+
+\mySubsubsection{5.6.4.}{从队列中弹出元素}
+
+现在我们看看pop函数是如何实现的：
+
+\begin{cpp}
+bool pop(T& item) {
+    std::size_t head =
+        head_.load(std::memory_order_relaxed);
+
+    if (head == tail_.load(std::memory_order_acquire)) {
+        return false;
+    }
+
+    item = buffer_[head];
+
+    head_.store((head + 1) & (capacity_ - 1), std::memory_order_release);
+
+    return true;
+}
+\end{cpp}
+
+行 [1] 原子地读取 head\_ 的当前值（要读取的下一个项的索引）。我们使用 std::memory\_order\_relaxed，因为 head\_ 变量仅由消费者线程修改，因此不需要强制执行顺序，而消费者线程是唯一调用 pop 的线程。
+
+行 [2] 检查队列是否为空。如果 head\_ 的当前值与 tail\_ 的当前值相同，则队列为空，函数返回 false。我们使用 std::memory\_order\_acquire 原子读取 tail\_ 的值，以查看生产者线程对 tail\_ 所做的最新更改。
+
+行 [3] 将数据从队列复制到作为 pop 参数传递的项目引用。同样，此复制不是原子的。
+
+最后，行 [4] 更新 head\_ 的值。同样，我们使用 std::memory\_order\_release 原子地写入值，以便消费者线程查看消费者线程对 head\_ 所做的更改。
+
+SPSC无锁队列实现的代码如下
+
+\begin{cpp}
+#include <atomic>
+#include <cassert>
+#include <iostream>
+#include <vector>
+#include <thread>
+
+template<typename T>
+class spsc_lock_free_queue {
+    public:
+    // capacity must be power of two to avoid using modulo operator
+    when calculating the index
+    explicit spsc_lock_free_queue(size_t capacity) : capacity_(capacity), buffer_(capacity) {
+        assert((capacity & (capacity - 1)) == 0 && "capacity must be a
+        power of 2");
+    }
+
+    spsc_lock_free_queue(const spsc_lock_free_queue &) = delete;
+
+    spsc_lock_free_queue &operator=(const spsc_lock_free_queue &) = delete;
+
+    bool push(const T &item) {
+        std::size_t tail = tail_.load(std::memory_order_relaxed);
+        std::size_t next_tail = (tail + 1) & (capacity_ - 1);
+        if (next_tail != head_.load(std::memory_order_acquire)) {
+            buffer_[tail] = item;
+            tail_.store(next_tail, std::memory_order_release);
+            return true;
+        }
+
+        return false;
+    }
+
+    bool pop(T &item) {
+        std::size_t head = head_.load(std::memory_order_relaxed);
+        if (head == tail_.load(std::memory_order_acquire)) {
+            return false;
+        }
+
+        item = buffer_[head];
+        head_.store((head + 1) & (capacity_ - 1), std::memory_order_release);
+        return true;
+    }
+private:
+    const std::size_t capacity_;
+    std::vector<T> buffer_;
+    std::atomic<std::size_t> head_{0};
+    std::atomic<std::size_t> tail_{0};
+};
+\end{cpp}
+
+完整示例的代码可以在以下书籍存储库中找到：  \url{https://github.com/PacktPublishing/Asynchronous-Programming-in-CPP/blob/main/Chapter_05/5x09-SPSC_lock_free_queue.cpp}
+
+在本节中，我们实现了 SPSC 无锁队列作为原子类型和操作的应用。在第 13 章中，我们将重新讨论此实现并改进其性能。
+
+
+
+

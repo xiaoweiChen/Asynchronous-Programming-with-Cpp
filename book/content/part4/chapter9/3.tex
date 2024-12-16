@@ -1,5 +1,101 @@
 
 
-\mySubsubsection{9.3.1.}{Synchronous operations}
+Boost.Asio 可以使用同步和异步操作与 I/O 服务交互。让我们了解它们的行为方式以及主要区别是什么。
 
-\mySubsubsection{9.3.2.}{Asynchronous operations}
+\mySubsubsection{9.3.1.}{同步操作}
+
+如果程序想要以同步方式使用 I/O 服务，通常它会创建一个 I/O 对象并使用其同步操作方法：
+
+\begin{cpp}
+boost::asio::io_context io_context;
+boost::asio::steady_timer timer(io_context, 3s);
+timer.wait();
+\end{cpp}
+
+调用 timer.wait() 时，请求将发送到 I/O 执行上下文对象 (io\_context)，该对象调用 OS 执行操作。 OS 完成任务后，将结果返回给 io\_context，然后 io\_context 将结果（如果出现任何问题，则为错误）转换回 I/O 对象（定时器）。错误类型为 boost::system::error\_code。如果发生错误，则会引发异常。
+
+如果我们不想抛出异常，我们可以通过引用同步方法传递一个错误对象来捕获操作的状态并在之后检查它：
+
+\begin{cpp}
+boost::system::error_code ec;
+Timer.wait(server_endpoint, ec);
+\end{cpp}
+
+\mySubsubsection{9.3.2.}{异步操作}
+
+对于异步操作，我们还需要将完成处理程序传递给异步方法。此完成处理程序是一个可调用对象，当异步操作完成时，它将由 I/O 上下文对象调用，通知程序有关结果或操作错误。
+其签名如下：
+
+\begin{cpp}
+void completion_handler(
+    const boost::system::error_code& ec);
+\end{cpp}
+
+继续计时器示例，现在我们需要调用异步操作：
+
+\begin{cpp}
+socket.async_wait(completion_handler);
+\end{cpp}
+
+再次， I/O 对象（计时器）将请求转发到 I/O 执行上下文对象（io\_context）。 io\_context 请求操作系统启动异步操作。
+
+当操作完成后，操作系统将结果放入队列中， io\_context 正在监听该队列。然后， io\_context 将结果从队列中取出，将错误转换为错误代码对象，并触发完成处理程序以通知程序任务和结果的完成情况。
+
+为了允许 io\_context 执行这些步骤，程序必须执行 boost::asio::io\_context::run()（或前面介绍的管理事件处理循环的类似函数）并在处理任何未完成的异步操作时阻塞当前线程。如前所述，如果没有待处理的异步操作， boost::asio::io\_context::run() 将退出。
+
+完成处理程序必须是可复制构造的，这意味着必须有一个可用的复制构造函数。如果需要临时资源（例如内存、线程或文件描述符），则会在调用完成处理程序之前释放此资源。这使我们能够调用相同的操作而不会重叠资源使用，从而避免增加系统中的峰值资源使用率。
+
+\mySamllsubsection{错误处理}
+
+如前所述， Boost.Asio 允许用户以两种不同的方式处理错误：使用错误代码或抛出异常。如果我们在调用 I/O 对象方法时传递对 boost::system::error\_code 对象的引用，则实现将通过该变量传递错误；否则，将抛出异常。
+
+我们已经按照第一种方法通过检查错误代码实现了几个示例。现在让我们看看如何捕获异常。
+
+以下示例创建一个有效期为三秒的计时器。 io\_context 对象从后台线程 io\_thread 运行。当计时器通过调用其 async\_wait() 函数启动异步任务时，它会传递 boost::asio::use\_future 参数，因此该函数返回一个未来对象 fut，稍后在 try-catch 块中使用该对象来调用其 get() 函数并检索存储的结果或异常，正如我们在第 6 章中学到的那样。启动后异步操作，主线程等待一秒钟，计时器通过调用其 cancel() 函数取消操作。由于这发生在到期时间（三秒）之前，因此会引发异常：
+
+\begin{cpp}
+#include <boost/asio.hpp>
+#include <chrono>
+#include <future>
+#include <iostream>
+#include <thread>
+
+using namespace std::chrono_literals;
+
+int main() {
+    boost::asio::io_context io_context;
+    boost::asio::steady_timer timer(io_context, 1s);
+
+    auto fut = timer.async_wait(
+                        boost::asio::use_future);
+
+    std::thread io_thread([&io_context]() {
+                        io_context.run();
+    });
+
+    std::this_thread::sleep_for(3s);
+
+    timer.cancel();
+
+    try {
+        fut.get();
+        std::cout << "Timer expired successfully!\n";
+    } catch (const boost::system::system_error& e) {
+        std::cout << "Timer failed: "
+                  << e.code().message() << '\n';
+    }
+    io_thread.join();
+    return 0;
+}
+\end{cpp}
+
+捕获类型为boost::system::system\_error的异常，并打印其消息。如果计时器在异步操作完成后取消其操作（在本例中，通过使主线程休眠超过三秒），计时器将成功过期，并且不会抛出异常。
+
+现在我们已经了解了 Boost.Asio 的主要构建块以及它们如何相互作用，让我们回顾并了解其实现背后的设计模式。
+
+
+
+
+
+
+

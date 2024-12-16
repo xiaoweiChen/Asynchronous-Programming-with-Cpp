@@ -1,9 +1,264 @@
 
+Boost.Asio 是一个跨平台的 C++ 库，由 Chris Kohlhoff 创建，提供可移植的网络和低级 I/O 编程，包括套接字、计时器、主机名解析、套接字 iostream、串行端口、文件描述符和 Win dows HANDLE，提供一致的异步模型。它还提供协程支持，但正如我们在上一章中了解到的，它们现在在 C++20 中可用，因此我们在本章中仅简要介绍它们。
 
-\mySubsubsection{9.2.1.}{I/O objects}
+Boost.Asio 允许程序管理长时间运行的操作，而无需明确使用线程和锁。此外，由于它在操作系统服务之上实现了一层，因此它可以使用最合适的底层操作系统机制来实现可移植性、效率、易用性和可扩展性，例如分散-聚集 I/O 操作或移动数据，同时最大限度地减少昂贵的复制。
 
-\mySubsubsection{9.2.2.}{I/O execution context objects}
+让我们首先了解基本的 Boost.Asio 块、 I/O 对象和 I/O 执行上下文对象。
 
-\mySubsubsection{9.2.3.}{The event processing loop}
+\mySubsubsection{9.2.1.}{I/O对象}
+
+有时，应用程序需要访问 OS 服务，在其上运行异步任务并收集结果或错误。 Boost.Asio 提供了一种由 I/O 对象和 I/O 执行上下文对象组成的机制来实现此功能。
+
+I/O 对象是面向任务的对象，表示执行 I/O 操作的实际实体。如图 9.1 所示， Boost.Asio 提供了核心类来管理并发、流、缓冲区或库中的其他核心功能，还包括用于通过传输控制协议/I nternet 协议 (TCP/IP)、用户数据报协议 (UDP) 或 Internet 控制消息协议 (ICMP) 进行网络通信的可移植网络类，用于定义安全层、传输协议和串行端口等任务的类，以及用于处理取决于底层操作系统的特定设置的平台特定类。
+
+\myGraphic{0.8}{content/part4/chapter9/images/1.png}{图 9.1 – I/O 对象}
+
+I/O 对象不直接在 OS 中执行其任务。它们需要通过 I/O 执行上下文对象与 OS 进行通信。上下文对象的实例作为 I/O 对象构造函数中的第一个参数传递。在这里，我们定义一个 I/O 对象（一个到期时间为三秒的计时器）并通过其构造函数传递一个 I/O 执行上下文对象 (io\_ context)：
+
+\begin{cpp}
+#include <boost/asio.hpp>
+#include <chrono>
+
+using namespace std::chrono_literals;
+
+boost::asio::io_context io_context;
+boost::asio::steady_timer timer(io_context, 3s);
+\end{cpp}
+
+大多数 I/O 对象都有名称以 async\_ 开头的方法。这些方法触发异步操作，当操作完成时，将调用完成处理程序（即作为参数传递给方法的可调用对象）。这些方法立即返回，不会阻塞程序流。当前线程可以在任务未完成时继续执行其他任务。完成后，将调用并执行完成处理程序，处理异步任务的结果或错误。
+
+I/O 对象还提供了阻塞对应方法，这些方法将阻塞直至完成。这些方法不需要接收处理程序作为参数。
+
+如前所述，请注意， I/O 对象不直接与操作系统交互；它们需要一个 I/O 执行上下文对象。
+让我们了解一下这类对象。
+
+\mySubsubsection{9.2.2.}{I/O执行上下文对象}
+
+为了访问 I/O 服务，程序至少使用一个 I/O 执行上下文对象，该对象代表 OS I/O 服务的网关。它使用 boost::asio::io\_context 类实现，为 I/O 对象提供 OS 服务的核心 I/O 功能。在 Wi ndows 中， boost::asio::io\_context 基于 I/O 完成端口 (IOCP)；在 Linux 上，它基于 epoll；在FreeBSD/macOS 上，它基于 kqueue。
+
+\myGraphic{0.6}{content/part4/chapter9/images/2.png}{图 9.2 – Boost.Asio 架构}
+
+boost::asio::io\_context 是 boost::asio::execution\_context 的子类，它是函数对象执行的基类，也被其他执行上下文对象继承，例如 boost::asio::thread\_pool 或 boost::asio::system\_context。
+
+在本章中，我们将使用 boost::asio::io\_context 作为我们的执行上下文对象。自 1.66.0 版本以来， boost::asio::io\_context 类已替代了 boost::asio::io\_service类，并采用了 C++ 中更多现代特性和实践。 boost::asio::io\_service 仍可向后兼容。
+
+如前所述， Boost.Asio 对象可以使用以 async\_ 开头的方法调度异步操作。当所有异步任务都调度完毕后，程序需要调用 boost::asio::io\_context::run() 函数来执行事件处理循环，让操作系统处理任务并将结果传递给程序并触发处理程序。
+
+回到我们之前的示例，我们现在将设置完成处理程序 on\_timeout()，这是一个可调用对象（ 在本例中是一个函数），我们在调用异步 async\_wait() 函数时将其作为参数传递。以下是代码示例：
+
+\begin{cpp}
+#include <boost/asio.hpp>
+#include <iostream>
+
+void on_timeout(const boost::system::error_code& ec) {
+    if (!ec) {
+        std::cout << "Timer expired.\n" << std::endl;
+    } else {
+        std::cerr << "Error: " << ec.message() << '\n';
+    }
+}
+
+int main() {
+    boost::asio::io_context io_context;
+    boost::asio::steady_timer timer(io_context,
+                                std::chrono::seconds(3));
+    timer.async_wait(&on_timeout);
+    io_context.run();
+    return 0;
+}
+\end{cpp}
+
+运行此代码，三秒后我们应该在控制台中看到消息“Timer expired.”，或者如果异步调用由于任何原因失败，则会看到一条错误消息。
+
+boost::io\_context::run() 是一个阻塞调用。这旨在保持事件循环运行，允许异步操作运行，并防止程序退出。显然，可以在新线程中调用此函数，并使主线程保持畅通，以继续执行其他任务，正如我们在前面的章节中看到的那样。
+
+当没有待处理的异步操作时， boost::io\_context::run() 将返回。有一个模板类 boost::asio::executor\_work\_guard，它可以保持 io\_context 忙碌，并在需要时避免其退出。让我们通过一个例子看看它是如何工作的。
+
+让我们首先定义一个后台任务，该任务将等待两秒钟，然后使用 boost::asio::io\_context::post( ) 函数通过 io\_context 发布一些工作：
+
+\begin{cpp}
+#include <boost/asio.hpp>
+#include <chrono>
+#include <iostream>
+#include <thread>
+
+using namespace std::chrono_literals;
+
+void background_task(boost::asio::io_context& io_context) {
+    std::this_thread::sleep_for(2s);
+    std::cout << "Posting a background task.\n";
+    io_context.post([]() {
+        std::cout << "Background task completed!\n";
+    });
+}
+\end{cpp}
+
+在 main() 函数中，创建了 io\_context 对象，并使用该 io\_context 对象构造了一个 work\_guard 对象。
+
+然后，创建两个线程， io\_thread（io\_context 在其中运行）和 worker（background\_task() 在其中运行）。我们还将 io\_context 作为对后台任务的引用传递以发布工作，如前所述。
+
+有了这个，主线程就会做一些工作（等待五秒钟），然后通过调用 reset() 函数删除工作保护，让 io\_context 退出其 run() 函数，并在退出之前连接两个线程，如下所示：
+
+\begin{cpp}
+int main() {
+    boost::asio::io_context io_context;
+    auto work_guard = boost::asio::make_work_guard(
+                      io_context);
+
+    std::thread io_thread([&io_context]() {
+        std::cout << "Running io_context.\n";
+        io_context.run();
+        std::cout << "io_context stopped.\n";
+    });
+
+    std::thread worker(background_task,
+                        std::ref(io_context));
+
+    // Main thread doing some work.
+    std::this_thread::sleep_for(5s);
+    std::cout << "Removing work_guard." << std::endl;
+    work_guard.reset();
+    worker.join();
+    io_thread.join();
+    return 0;
+}
+\end{cpp}
+
+如果我们运行上面的代码，则输出如下：
+
+\begin{shell}
+Running io_context.
+Posting a background task.
+Background task completed!
+Removing work_guard.
+io_context stopped.
+\end{shell}
+
+我们可以看到后台线程如何正确地发布后台任务，并且这在工作保护被移除并且 I/O 上下文对象停止执行之前完成。
+
+保持 io\_context 对象处于活动状态并处理请求的另一种方法是通过连续调用 async\_ 函数或从完成处理程序发布工作来提供异步任务。这是读取或写入套接字或流时的常见模式：
+
+\begin{cpp}
+#include <boost/asio.hpp>
+#include <chrono>
+#include <functional>
+#include <iostream>
+
+using namespace std::chrono_literals;
+
+int main() {
+    boost::asio::io_context io_context;
+    boost::asio::steady_timer timer(io_context, 3s);
+
+    std::function<void(const boost::system::error_code&)>
+                    timer_handler;
+
+    timer_handler = [&timer, &timer_handler](
+                    const boost::system::error_code& ec) {
+        if (!ec) {
+            std::cout << "Handler: Timer expired.\n";
+            timer.expires_after(1s);
+            timer.async_wait(timer_handler);
+        } else {
+            std::cerr << "Handler error: "
+                      << ec.message() << std::endl;
+            }
+        };
+    timer.async_wait(timer_handler);
+    io_context.run();
+    return 0;
+}
+\end{cpp}
+
+在这种情况下， timer\_handler 是完成处理程序，定义为一个 lambda 函数，用于捕获计时器和其自身。每秒，当计时器到期时，它会打印 "Handler: Timer expired." 消息，并通过将新的异步任务（使用 async\_wait() 函数）通过计时器对象加入 io\_context 对象来重新启动自身。
+
+正如我们已经看到的， io\_context 对象可以从任何线程运行。默认情况下，此对象是线程安全的，但在某些情况下，我们想要更好的性能，我们可能希望避免这种安全性。这可以在其构造过程中进行调整，我们将在下一节中看到。
+
+\mySamllsubsection{并发提示}
+
+io\_context 构造函数接受并发提示作为参数，向实现建议应用于运行完成处理程序的活动线程数。
+
+默认情况下，此值为 BOOST\_ASIO\_CONCURRENCY\_HINT\_SAFE（值 1），表示 io\_conte xt 对象将从单个线程运行，因此可以实现多项优化。这并不意味着 io\_context 只能从一个线程使用；它仍然提供线程安全性，并且可以从多个线程使用 I/O 对象。
+
+可以指定的其他值如下：
+
+\begin{itemize}
+\item
+BOOST\_ASIO\_CONCURRENCY\_HINT\_UNSAFE：禁用锁定，因此对 io\_context 或 I/O 对象的所有操作都必须在同一个线程中发生。
+
+\item
+BOOST\_ASIO\_CONCURRENCY\_HINT\_UNSAFE\_IO：禁用反应器中的锁定，但将其保留在调度程序中，因此 io\_context 对象中的所有操作都可以使用除 run() 函数和与执行事件处理循环相关的其他方法之外的不同线程。在解释库背后的设计原理时，我们将了解调度程序和反应器。
+\end{itemize}
+
+现在让我们了解什么是事件处理循环以及如何管理它。
+
+\mySubsubsection{9.2.3.}{事件处理循环}
+
+使用 boost::asio::io\_context::run() 方法， io\_context 会阻塞并继续处理 I/O 异步任务，直到所有任务完成并通知完成处理程序。此 I/O 请求处理在内部事件处理循环中完成。
+
+还有其他方法可以控制事件循环并避免阻塞，直到所有异步事件都处理完毕。这些方法如下：
+
+\begin{itemize}
+\item
+poll：运行事件处理循环来执行已就绪的处理程序
+
+\item
+poll\_one：运行事件处理循环来执行一个就绪的处理程序
+
+\item
+run\_for：运行事件处理循环指定的时间
+
+\item
+run\_until：与上一个相同，但只到指定时间
+
+\item
+run\_one：运行事件处理循环以执行最多一个处理程序
+
+\item
+run\_one\_for：与上一个相同，但只持续指定的时间
+
+\item
+run\_one\_until：与上一个相同，但只到指定时间
+\end{itemize}
+
+还可以通过调用 boost::asio::io\_context::stop() 方法来停止事件循环，或者通过调用 boost:asio::io\_context::stopped() 检查其状态是否已停止。
+当事件循环未运行时，已安排的任务将继续执行。其他任务将保持待处理状态。可以通过使用前面提到的方法之一再次启动事件循环来恢复待处理的任务并收集待处理的结果。
+
+在前面的示例中，应用程序通过调用异步方法或使用 post() 函数将一些工作发送给 io\_context。现在让我们了解 dispatch() 及其与 post() 的区别。
+
+给 io\_context 分配一些工作除了通过不同 I/O 对象的异步方法或使用 executor\_work\_guard（如下所述）将工作发送到 io\_context 之外，我们还可以使用 boost::asio::post() 和 boost::asio::dispatch() 模板方法。这两个函数都用于将一些工作安排到 io\_context 对象中。
+
+post() 函数保证任务一定会被执行。它把完成处理程序放入执行队列，最终会执行该任务：
+
+\begin{cpp}
+boost::asio::io_context io_context;
+io_context.post([] {
+    std::cout << "This will always run asynchronously.\n";
+});
+\end{cpp}
+
+另一方面，如果 io\_context 或 strand（本章后面会详细介绍 strands）与分派任务的线程相同，则 dispatch() 可以立即执行任务，否则将其放置在队列中以进行异步执行：
+
+\begin{cpp}
+boost::asio::io_context io_context;
+io_context.dispatch([] {
+    std::cout << "This might run immediately or be queued.\n";
+});
+\end{cpp}
+
+因此，使用 dispatch()，我们可以通过减少上下文切换或排队延迟来优化性能。
+
+即使有其他待处理事件排队，已调度事件也可以直接从当前工作线程执行。已发布的事件必须始终由 I/O 执行上下文管理，等待其他处理程序完成后才允许执行。
+
+现在我们已经了解了一些基本概念，让我们来了解同步和异步操作的工作原理。
+
+
+
+
+
+
+
+
+
 
 

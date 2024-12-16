@@ -1,7 +1,539 @@
 
+在上一节中，我们学习了协程的基础知识、它们是什么以及一些用例。
 
-\mySubsubsection{8.4.1.}{The simplest coroutine}
+在本节中，我们将实现三个简单的协程来说明实现和使用它们的基础知识：
 
-\mySubsubsection{8.4.2.}{A yielding coroutine}
+\begin{itemize}
+\item
+最简单的协程，仅返回
 
-\mySubsubsection{8.4.3.}{A waiting coroutine}
+\item
+协程将值发送回调用者
+
+\item
+协程从调用者处获取值
+\end{itemize}
+
+\mySubsubsection{8.4.1.}{最简单的协程}
+
+我们知道，协程是一个可以自行暂停并可由调用者恢复的函数。我们还知道，如果函数至少使用一个 co\_yield、 co\_await 或 co\_return 表达式，编译器就会将该函数标识为协程。
+
+编译器将转换协程源代码并创建一些数据结构和函数，使协程能够正常运行并能够被暂停和恢复。这是保持协程状态并能够与协程进行通信所必需的。
+
+编译器会处理所有这些细节，但请记住， C++ 对协程的支持还处于相当低的水平。有一些库可以让我们在 C++ 中使用协程时更加轻松。其中一些是 Lewis Baker 的 cppcoro 和 Boost.
+Cobalt。 Boost.Asio 库也支持协程。这些库是接下来两章的主题。
+
+让我们从头开始。我们指的是绝对的从头开始。我们将编写一些代码，并根据编译器错误和 C++ 参考来编写一个基本但功能齐全的协程。
+
+下面的代码是协程最简单的实现：
+
+\begin{cpp}
+void coro_func() {
+    co_return;
+}
+int main() {
+    coro_func();
+}
+\end{cpp}
+
+很简单，不是吗？我们的第一个协程将不返回任何内容。它不会做任何其他事情。遗憾的是，上述代码对于功能性协程来说太简单了，无法编译。使用 GCC 14.1 进行编译时，我们收到以下错误：
+
+\begin{shell}
+error: coroutines require a traits template; cannot find 'std::coroutine_traits'
+\end{shell}
+
+我们还收到以下说明：
+
+\begin{shell}
+note: perhaps '#include <coroutine>' is missing
+\end{shell}
+
+编译器给了我们一个提示：我们可能忘记包含一个必需的文件。让我们包含 <coroutine> 头文件。我们稍后会处理有关特征模板的错误：
+
+\begin{cpp}
+#include <coroutine>
+void coro_func() {
+    co_return;
+}
+int main() {
+    coro_func();
+}
+\end{cpp}
+
+编译上述代码时，我们得到以下错误
+
+\begin{shell}
+error: unable to find the promise type for this coroutine
+\end{shell}
+
+我们的第一个版本的协程给出了一个编译器错误，指出无法找到类型 std::coroutine\_traits 模板。现在我们得到了一个与承诺类型相关的错误。
+
+查看 C++ 参考，我们发现 std::coroutine\_traits 模板确定了协程的返回类型和参数类型。该参考还指出，协程的返回类型必须定义一个名为 promise\_type 的类型。按照参考建议，我们可以编写一个新版本的协程：
+
+\begin{cpp}
+#include <coroutine>
+struct return_type {
+    struct promise_type {
+    };
+};
+template<>
+struct std::coroutine_traits<return_type> {
+    using promise_type = return_type::promise_type;
+};
+return_type coro_func() {
+    co_return;
+}
+int main() {
+    coro_func();
+}
+\end{cpp}
+
+请注意，协程的返回类型可以有任何名称（我们在这里将其称为 return\_type，因为对于这个简单的例子来说很方便）。
+
+再次编译上述代码会给我们一些错误（为了清晰起见，我们对其进行了编辑）。所有错误都是关于 promise\_type 结构中缺少函数的：
+
+\begin{shell}
+error: no member named 'return_void' in 'std::__n4861::coroutine_traits<return_type>::promise_type'
+error: no member named 'initial_suspend' in 'std::__n4861::coroutine_traits<return_type>::promise_type'
+error: no member named 'unhandled_exception' in 'std::__n4861::coroutine_traits<return_type>::promise_type'
+error: no member named 'final_suspend' in 'std::__n4861::coroutine_traits<return_type>::promise_type'
+error: no member named 'get_return_object' in 'std::__n4861::coroutine_traits<return_type>::promise_type'
+\end{shell}
+
+到目前为止，我们看到的所有编译器错误都与代码中缺少的功能有关。用 C++ 编写协程需要遵循一些规则并帮助编译器使其生成的代码具有功能性。
+
+以下是最简单协程的最终版本：
+
+\begin{cpp}
+#include <coroutine>
+
+struct return_type {
+    struct promise_type {
+        return_type get_return_object() noexcept {
+            return return_type{ *this };
+        }
+
+        void return_void() noexcept {}
+
+        std::suspend_always initial_suspend() noexcept {
+            return {};
+        }
+
+        std::suspend_always final_suspend() noexcept {
+            return {};
+        }
+
+        void unhandled_exception() noexcept {}
+    };
+
+    explicit return_type(promise_type&) {
+    }
+
+    ~return_type() noexcept {
+    }
+};
+
+return_type coro_func() {
+    co_return;
+}
+
+int main() {
+    coro_func();
+}
+\end{cpp}
+
+你可能注意到了，我们删除了 std::coroutine\_traits 模板。实现 return 和 promise 类型就足够了。
+
+上述代码编译时没有任何错误，您可以运行它。它什么也没做！但这是我们的第一个协程，我们已经了解到，我们需要提供编译器创建协程所需的一些代码。
+
+\mySamllsubsection{promise 类型}
+
+编译器需要 promise 类型。我们需要始终定义此类型（它可以是类或结构），它必须命名为promise\_type，并且必须实现 C++ 引用中指定的某些函数。我们已经看到，如果我们不这样做，编译器会抱怨并给出错误。
+
+协程返回的类型中必须定义承诺类型，否则代码将无法编译。返回的类型（有时也称为包装类型，因为它包装了 promise\_type）可以任意命名。
+
+\mySubsubsection{8.4.2.}{协程让步}
+
+不做任何事的协程很适合用来说明一些基本概念。现在我们将实现另一个可以将数据发送回调用者的协程。
+
+在第二个示例中，我们将实现一个生成消息的协程。这将是协程的“hello world”。协程会说hello，调用函数会打印从协程收到的消息。
+
+为了实现该功能，我们需要建立从协程到调用者的通信通道。此通道是允许协程将值传递给调用者并从调用者接收信息的机制。此通道是通过协程的 Promise 类型和句柄建立的，用于管理协程的状态。
+
+通信通道的工作方式如下：
+
+\begin{itemize}
+\item
+协程框架：调用协程时，它会创建一个协程框架，其中包含暂停和恢复其执行所需的所有状态信息。这包括局部变量、承诺类型和任何内部状态。
+
+\item
+Promise 类型：每个协程都有一个关联的 Promise 类型，负责管理协程与调用者函数的交互。 Promise 是存储协程返回值的地方，它提供函数来控制协程的行为。我们将在本章的示例中看到这些函数。 Promise 是调用者与协程交互的接口。
+
+\item
+协程句柄：协程句柄是一种允许访问协程框架（协程的内部状态）并允许调用者恢复或销毁协程的类型。调用者可以使用句柄在协程暂停后恢复协程（例如，在 co\_await 或 co\_yield 之后）。句柄还可用于检查协程是否已完成或清理其资源。
+
+\item
+暂停和恢复机制：当协程产生一个值 (co\_yield) 或等待异步操作 (co\_await) 时，它会暂停执行，并将其状态保存在协程框架中。然后，调用者可以在稍后恢复协程，通过协程句柄检索产生的或等待的值并继续执行。
+\end{itemize}
+
+在下面的例子中，我们将看到，这个通信通道需要我们这边大量的代码来帮助编译器生成协程运行所需的所有代码。
+
+以下代码是调用函数和协程的新版本：
+
+\begin{cpp}
+return_type coro_func() {
+    co_yield "Hello from the coroutine\n"s;
+    co_return;
+}
+
+int main() {
+    auto rt = coro_func();
+    std::cout << rt.get() << std::endl;
+    return 0;
+}
+\end{cpp}
+
+变化如下：
+
+\begin{itemize}
+\item
+[1]：协程产生并发送一些数据（在本例中为 std::string 对象）给调用者
+
+\item
+[2]：调用者读取该数据并打印出来
+\end{itemize}
+
+所需的通信机制在承诺类型和返回类型（承诺类型包装器）中实现。
+
+当编译器读取 co\_yield 表达式时，它将生成对 promise 类型中定义的 Yield\_value 函数的调用。
+
+以下代码是我们版本的该函数的实现，它生成（或产生）一个 std::string 对象：
+
+\begin{cpp}
+std::suspend_always yield_value(std::string msg) noexcept {
+    output_data = std::move(msg);
+    return {};
+}
+\end{cpp}
+
+该函数获取一个 std::string 对象并将其移动到 promise 类型的 output\_data 成员变量。但这只会将数据保留在 promise 类型内。我们需要一种机制来将该字符串从协程中取出。
+
+\mySamllsubsection{句柄类型}
+
+一旦我们需要一个与协程之间的通信通道，我们就需要一种方法来引用已暂停或正在执行的协程。 C++ 标准库在所谓的协程句柄中实现了这种机制。其类型为 std::coroutine\_handle ，它是返回类型的成员变量。此结构还负责句柄的整个生命周期，包括创建和销毁它。
+
+以下代码片段是我们添加到返回类型中以管理协程句柄的功能：
+
+\begin{cpp}
+std::coroutine_handle<promise_type> handle{};
+
+explicit return_type(promise_type& promise) : handle{ std::coroutine_
+    handle<promise_type>::from_promise(promise)} {
+}
+
+~return_type() noexcept {
+    if (handle) {
+        handle.destroy();
+    }
+}
+\end{cpp}
+
+上述代码声明了一个 std::coroutine\_handle<promise\_type> 类型的协程句柄，并在返回类型构造函数中创建该句柄。该句柄在返回类型析构函数中被销毁。
+
+现在，回到我们的yielding协程。唯一缺少的是get（）函数，以便调用者函数能够访问协程生成的字符串：
+
+\begin{cpp}
+std::string get() {
+    if (!handle.done()) {
+        handle.resume();
+    }
+    return std::move(handle.promise().output_data);
+}
+\end{cpp}
+
+如果协程未终止， get() 函数将恢复协程，然后返回字符串对象。
+
+以下是我们的第二个协程的完整代码：
+
+\begin{cpp}
+#include <coroutine>
+#include <iostream>
+#include <string>
+
+using namespace std::string_literals;
+
+struct return_type {
+    struct promise_type {
+        std::string output_data { };
+
+        return_type get_return_object() noexcept {
+            std::cout << "get_return_object\n";
+            return return_type{ *this };
+        }
+
+        void return_void() noexcept {
+            std::cout << "return_void\n";
+        }
+
+        std::suspend_always yield_value(
+        std::string msg) noexcept {
+            std::cout << "yield_value\n";
+            output_data = std::move(msg);
+            return {};
+        }
+
+        std::suspend_always initial_suspend() noexcept {
+            std::cout << "initial_suspend\n";
+            return {};
+        }
+
+        std::suspend_always final_suspend() noexcept {
+            std::cout << "final_suspend\n";
+            return {};
+        }
+
+        void unhandled_exception() noexcept {
+            std::cout << "unhandled_exception\n";
+        }
+    };
+
+    std::coroutine_handle<promise_type> handle{};
+
+    explicit return_type(promise_type& promise)
+        : handle{ std::coroutine_handle<
+                  promise_type>::from_promise(promise)}{
+        std::cout << "return_type()\n";
+    }
+
+    ~return_type() noexcept {
+        if (handle) {
+            handle.destroy();
+        }
+        std::cout << "~return_type()\n";
+    }
+
+    std::string get() {
+        std::cout << "get()\n";
+        if (!handle.done()) {
+            handle.resume();
+        }
+        return std::move(handle.promise().output_data);
+    }
+};
+
+return_type coro_func() {
+    co_yield "Hello from the coroutine\n"s;
+    co_return;
+}
+
+int main() {
+    auto rt = coro_func();
+    std::cout << rt.get() << std::endl;
+    return 0;
+}
+\end{cpp}
+
+运行上述代码将打印以下消息：
+
+\begin{shell}
+get_return_object
+return_type()
+initial_suspend
+get()
+yield_value
+Hello from the coroutine
+~return_type()
+\end{shell}
+
+此输出向我们展示了协程执行期间发生的情况：
+
+\begin{enumerate}
+\item
+调用 get\_return\_object 后创建 return\_type 对象
+
+\item
+协程最初处于挂起状态
+
+\item
+调用者希望从协程中获取消息，因此调用 get()
+
+\item
+调用yield\_value，恢复协程，并将消息复制到成员
+
+\item
+最后，调用函数打印消息，协程返回
+\end{enumerate}
+
+请注意，承诺（和承诺类型）与第 6 章中解释的 C++ 标准库 std::promise 类型无关。
+
+\mySubsubsection{8.4.3.}{协程等待}
+
+在上一个示例中，我们了解了如何实现一个协程，该协程可以通过向调用方发送 std::string 对象来与调用方进行通信。现在，我们将实现一个协程，该协程可以等待调用方发送的输入数据。在我们的示例中，协程将等待，直到它获得 std::string 对象，然后打印它。当我们说协程“等待”时，我们的意思是它被暂停（即不执行）直到收到数据。
+
+让我们从协程和调用函数的改变开始：
+
+\begin{cpp}
+return_type coro_func() {
+    std::cout << co_await std::string{ };
+    co_return;
+}
+
+int main() {
+    auto rt = coro_func();
+    rt.put("Hello from main\n"s);
+    return 0;
+}
+\end{cpp}
+
+在上面的代码中，调用者函数调用 put() 函数（返回类型结构中的方法），协程调用 co\_await 等待来自调用者的 std::string 对象。
+
+返回类型的改变很简单，就是增加put()函数即可：
+
+\begin{cpp}
+void put(std::string msg) {
+    handle.promise().input_data = std::move(msg);
+    if (!handle.done()) {
+        handle.resume();
+    }
+}
+\end{cpp}
+
+我们需要将 input\_data 变量添加到 promise 结构中。但是，仅仅因为对第一个示例（我们将其作为本章其余示例的起点，因为这是实现协程的最小代码）和上一个示例中的协程句柄进行了这些更改，代码就无法编译。编译器给出了以下错误：
+
+\begin{shell}
+error: no member named 'await_ready' in 'std::string' {aka 'std::__cxx11::basic_string<char>'}
+\end{shell}
+
+回到 C++ 引用，我们看到当协程调用 co\_await 时，编译器将生成代码来调用承诺对象中名为 await\_transform 的函数，该函数具有与协程正在等待的数据相同类型的参数。顾名思义， await\_transform 是一个将任何对象（在我们的示例中为 std::string）转换为可等待对象的函数。 std::string 不可等待，因此出现前面的编译器错误。
+
+await\_transform 必须返回一个 awaiter 对象。这只是一个简单的结构，实现了 awaiter 所需的接口，以便编译器可以使用。
+
+以下代码展示了我们对 await\_transform 函数和 awaiter 结构的实现：
+
+\begin{cpp}
+auto await_transform(std::string) noexcept {
+    struct awaiter {
+        promise_type& promise;
+
+        bool await_ready() const noexcept {
+            return true;
+        }
+
+        std::string await_resume() const noexcept {
+            return std::move(promise.input_data);
+        }
+
+        void await_suspend(std::coroutine_handle<
+                           promise_type>) const noexcept {
+        }
+    };
+    return awaiter(*this);
+}
+\end{cpp}
+
+promise\_type 函数 await\_transform 是编译器所必需的。我们不能为此函数使用不同的标识符。参数类型必须与协程正在等待的对象相同。 awaiter 结构可以任意命名。我们在这里使用 awaiter 是因为它具有描述性。 awaiter 结构必须实现三个函数：
+
+\begin{itemize}
+\item
+await\_ready：调用此函数检查协程是否已暂停。如果是，则返回 false。在我们的示例中，它始终返回 true，表示协程未暂停。
+
+\item
+await\_resume：这将恢复协程并生成 co\_await 表达式的结果。
+
+\item
+await\_suspend：在我们的简单等待程序中，它返回 void，这意味着将控制权传递给调用者，并且协程被暂停。 await\_suspend 也可能返回布尔值。在这种情况下返回 true 就像返回 void。返回 false 意味着协程已恢复。
+\end{itemize}
+
+这是等待协程的完整示例代码：
+
+\begin{cpp}
+#include <coroutine>
+#include <iostream>
+#include <string>
+
+using namespace std::string_literals;
+
+struct return_type {
+    struct promise_type {
+        std::string input_data { };
+
+        return_type get_return_object() noexcept {
+            return return_type{ *this };
+        }
+
+        void return_void() noexcept {
+        }
+
+        std::suspend_always initial_suspend() noexcept {
+            return {};
+        }
+
+        std::suspend_always final_suspend() noexcept {
+            return {};
+        }
+
+        void unhandled_exception() noexcept {
+        }
+
+        auto await_transform(std::string) noexcept {
+            struct awaiter {
+                promise_type& promise;
+
+                bool await_ready() const noexcept {
+                    return true;
+                }
+
+                std::string await_resume() const noexcept {
+                    return std::move(promise.input_data);
+                }
+
+                void await_suspend(std::coroutine_handle<
+                                   promise_type>) const noexcept {
+                }
+            };
+
+            return awaiter(*this);
+        }
+    };
+
+    std::coroutine_handle<promise_type> handle{};
+
+    explicit return_type(promise_type& promise)
+        : handle{ std::coroutine_handle<
+                            promise_type>::from_promise(promise)} {
+    }
+
+    ~return_type() noexcept {
+        if (handle) {
+            handle.destroy();
+        }
+    }
+
+    void put(std::string msg) {
+        handle.promise().input_data = std::move(msg);
+        if (!handle.done()) {
+            handle.resume();
+        }
+    }
+};
+
+return_type coro_func() {
+    std::cout << co_await std::string{ };
+    co_return;
+}
+
+int main() {
+    auto rt = coro_func();
+    rt.put("Hello from main\n"s);
+    return 0;
+}
+\end{cpp}
+
+在本节中，我们了解了协程的三个基本示例。我们实现了最简单的协程，然后实现了具有通信通道的协程，以便为调用者生成数据（co\_yield）并等待来自调用者的数据（co\_await ）。
+
+在下一节中，我们将实现一种称为生成器的协程并生成数字序列。
+
+
+
+
+

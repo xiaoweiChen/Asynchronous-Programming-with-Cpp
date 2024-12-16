@@ -1,0 +1,69 @@
+
+线程本地存储 (TLS) 是一种内存管理技术，允许每个线程拥有自己的变量实例。此技术允许线程存储其他线程无法访问的线程特定数据，从而避免竞争条件并提高性能。这是因为消除了访问这些变量的同步机制开销。
+
+TLS 由操作系统实现，可使用自 C++11 起可用的 \verb|thread_local| 关键字访问。 \verb|thread_local| 提供了一种统一的方法来使用许多操作系统的 TLS 功能，并避免使用特定于编译器的语言扩展来访问 TLS 功能（此类扩展的一些示例是 TLS Windows API、 \verb|__declspec(thread)| MSVC 编译器语言扩展或 \verb|__thread| GCC 编译器语言扩展）。
+
+要将 TLS 与不支持 C++11 或更新版本的编译器一起使用，请使用 Boost.Library。它提供了\verb|boost::thread_specific_ptr| 容器，该容器实现了可移植的 TLS。
+
+线程局部变量可以声明如下：
+
+\begin{itemize}
+\item
+全局
+
+\item
+在命名空间中
+
+\item
+作为类静态成员变量
+
+\item
+在函数内部；它与使用 static 关键字分配的变量具有相同的效果，这意味着变量在程序的整个生命周期内分配，并且它们的值会在下一次函数调用中保留
+\end{itemize}
+
+以下示例显示三个线程使用不同的参数调用 multiplyByTwo 函数。此函数将 val 线程局部变量的值设置为参数值，将其乘以 2，然后打印到控制台：
+
+\begin{cpp}
+#include <iostream>
+#include <syncstream>
+#include <thread>
+
+#define sync_cout std::osyncstream(std::cout)
+
+thread_local int val = 0;
+
+void setValue(int newval) { val = newval; }
+
+void printValue() { sync_cout << val << ' '; }
+void multiplyByTwo(int arg) {
+    setValue(arg);
+    val *= 2;
+    printValue();
+}
+
+int main() {
+    val = 1; // Value in main thread
+    std::thread t1(multiplyByTwo, 1);
+    std::thread t2(multiplyByTwo, 2);
+    std::thread t3(multiplyByTwo, 3);
+    t1.join();
+    t2.join();
+    t3.join();
+    std::cout << val << std::endl;
+}
+\end{cpp}
+
+运行此代码片段将显示以下输出：
+
+\begin{shell}
+2 4 6 1
+\end{shell}
+
+在这里，我们可以看到每个线程都对其输入参数进行操作，导致 t1 打印 2、 t2 打印 4 并且 t 3 打印 6。运行主函数的主线程还可以访问其线程局部变量 val，该变量的值在程序启动时设置为 1，但仅在退出程序之前在主函数末尾打印到控制台时使用。
+
+与任何技术一样， TLS 也存在一些缺点。 TLS 会增加内存使用量，因为每个线程都会创建一个变量，因此在资源受限的环境中可能会出现问题。此外，与常规变量相比，访问 TLS 变量可能会产生一些开销。这对于性能至关重要的软件来说可能会出现问题。
+
+利用迄今为止学到的许多技术，让我们构建一个计时器。
+
+
+

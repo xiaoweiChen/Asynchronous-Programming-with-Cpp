@@ -1,4 +1,99 @@
 
-\mySubsubsection{8.3.1.}{New keywords}
+正如我们所见，协程只是函数，但它们与我们习惯的函数不同。它们具有特殊的属性，我们将在本章中研究这些属性。在本节中，我们将重点介绍 C++ 中的协程。
 
-\mySubsubsection{8.3.2.}{Coroutines restrictions}
+函数在被调用时开始执行，并且通常以返回语句或刚到达函数末尾时终止。
+
+函数从头到尾运行。它可能会调用另一个函数（如果是递归函数，则甚至会调用自身），也可能会抛出异常或有不同的返回点。但它总是从头到尾运行。
+
+协程则不同。协程是一个可以暂停自身的函数。协程的流程可能类似于以下伪代码：
+
+\begin{cpp}
+void coroutine() {
+    do_something();
+    co_yield;
+    do_something_else();
+    co_yield;
+    do_more_work();
+    co_return;
+}
+\end{cpp}
+
+我们很快就会看到带有 co\_ 前缀的术语的含义。
+
+对于协程，我们需要一种机制来保持执行状态，以便能够暂停/恢复协程。这是由编译器为我们完成的，但我们必须编写一些帮助代码，让编译器帮助我们。
+
+C++ 中的协程是无堆栈的。这意味着我们需要存储的状态才能暂停/恢复协程，存储在调用new/delete 来分配/释放动态内存的堆中。这些调用由编译器创建。
+
+\mySubsubsection{8.3.1.}{新关键字}
+
+因为协程本质上是一个函数（具有一些特殊属性，但仍然是一个函数），所以编译器需要某种方法来知道给定函数是否是协程。 C++20 引入了三个新关键字： co\_yield、 co\_await 和co\_return。如果一个函数至少使用这三个关键字中的一个，那么编译器就知道它是一个协程。
+
+下表总结了新关键字的功能：
+
+% Please add the following required packages to your document preamble:
+% \usepackage{longtable}
+% Note: It may be necessary to compile the document several times to get a multi-page table to line up properly
+\begin{longtable}{|l|l|l|}
+\hline
+\textbf{关键字} & \textbf{输入/输出} & \textbf{协程状态} \\ \hline
+\endfirsthead
+%
+\endhead
+%
+co\_yield    & 输出             & 暂停            \\ \hline
+co\_await    & 输入             & 暂停            \\ \hline
+co\_return   & 输出             & 终止            \\ \hline
+\end{longtable}
+
+\begin{center}
+表 8.1：新的协程关键字
+\end{center}
+
+在上表中，我们看到在 co\_yield 和 co\_await 之后，协程会自行挂起，而在 co\_return 之后，协程会终止（co\_return 相当于 C++ 函数中的 return 语句）。协程不能有 return 语句；它必须始终使用 co\_return。如果协程不返回任何值并且使用了其他两个协程关键字中的任何一个，则可以省略 co\_return 语句。
+
+\mySubsubsection{8.3.2.}{协程的限制}
+
+我们已经使用新的 coroutines 关键字说过协程是函数。但是协程有以下限制
+
+\begin{itemize}
+\item
+使用可变参数的可变数量参数的函数不能是协同程序（可变参数函数模板可以是协同程
+序）
+
+\item
+类构造函数或析构函数不能是协同程序
+
+\item
+constexpr 和 consteval 函数不能是协程
+
+\item
+返回 auto 的函数不能是协程，但带有尾随返回类型的 auto 可以
+
+\item
+main() 函数不能是协程
+
+\item
+Lambda 可以是协程
+\end{itemize}
+
+研究了协程的限制（基本上就是什么样的C++函数不可以成为协程），下一节我们就要开始实现协程了。
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

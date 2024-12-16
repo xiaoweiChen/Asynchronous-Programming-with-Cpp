@@ -1,0 +1,147 @@
+以前，我们实现了协程，并且在每次调用 co\_await 时，我们只对一个协程进行调用。这意味着我们只等待一个协程的结果。 Boost.Cobalt 具有允许我们等待多个协程的机制。这些机制称为同步函数。
+
+Boost.Cobalt 中实现了四个同步函数：
+
+\begin{itemize}
+\item
+race： race 函数等待一组协程中的一个完成，但它以伪随机方式执行。此机制有助于避免协程的匮乏，确保一个协程不会主导其他协程的执行流程。当您有多个异步操作并且希望第一个完成以确定流程时， race 将允许任何准备好的协程以不确定的顺序继续执行。
+
+当您有多个任务（一般意义上的任务，而不是 Boost.Cobalt 任务）并且有兴趣首先完成一个任务，而不优先考虑哪一个，但想防止一个协程在同时准备就绪的情况下总是获胜时，您将使用竞争。
+
+\item
+join： join 函数等待给定集合中的所有协程完成并将其结果作为值返回。如果任何协程抛出异常， join 会将异常传播给调用者。这是一种从多个异步操作中收集结果的方法，这些操作必须全部完成才能继续。
+
+当您需要多个异步操作的结果在一起并且希望在其中任何一个失败时抛出错误时，您将使用 join。
+
+\item
+gather： gather 函数与 join 类似，会等待一组协程完成，但其处理异常的方式不同。 gath er 不会在其中一个协程失败时立即抛出异常，而是会单独捕获每个协程的结果。这意味着您可以单独检查每个协程的结果（成功或失败）。
+当你需要所有异步操作完成，但想要单独捕获所有结果和异常以分别处理它们时，你将使用 gather。
+
+\item
+left\_race： left\_race 函数与 race 类似，但具有确定性行为。它从左到右评估协程，并等待第一个协程准备就绪。当协程完成的顺序很重要，并且您希望根据提供协程的顺序确保可预测的结果时，这会很有用。
+当您有多个潜在结果并且需要按照提供的顺序支持第一个可用的协同程序时，会使行为比 race 更可预测，您将使用 left\_race。
+\end{itemize}
+
+在本节中，我们将探讨 join 和 gather 函数的示例。如我们所见，这两个函数都会等待一组协程完成。它们之间的区别在于，如果任何协程抛出异常， join 就会抛出异常，而 gather 始终会返回所有等待的协程的结果。对于 gather 函数，每个协程的结果要么是错误（缺失值），要么是值。 join 返回一个值元组或抛出异常； gather 返回一个可选值元组，如果发生异常（可选变量未初始化），则该元组没有值。
+
+以下示例的完整代码位于 GitHub repo 中。我们将重点介绍主要部分。
+
+我们定义了一个简单的函数来模拟数据处理，这只是一个延迟。如果我们传递大于 5,000 毫秒的延迟，该函数将引发异常：
+
+\begin{cpp}
+boost::cobalt::promise<std::chrono::milliseconds::rep>
+process(std::chrono::milliseconds ms) {
+    if (ms > std::chrono::milliseconds(5000)) {
+        throw std::runtime_error("delay throw");
+    }
+
+    boost::asio::steady_timer tmr{ co_await boost::cobalt::this_coro::executor, ms };
+    co_await tmr.async_wait(boost::cobalt::use_op);
+    co_return ms.count();
+}
+\end{cpp}
+
+该功能是 Boost.Cobalt 的promise。
+
+现在，在代码的下一部分中，我们将等待这个promise的三个实例运行：
+
+\begin{cpp}
+auto result = co_await boost::cobalt::join(process(100ms),
+                                           process(200ms),
+                                           process(300ms));
+
+std::cout << "First coroutine finished in: "
+          << std::get<0>(result) << "ms\n";
+std::cout << "Second coroutine took finished in: "
+          << std::get<1>(result) << "ms\n";
+std::cout << "Third coroutine took finished in: "
+          << std::get<2>(result) << "ms\n";
+\end{cpp}
+
+上述代码调用 join 等待三个协程执行完毕，然后打印出执行时间。可以看到，结果是一个元组，为了代码尽可能简洁，我们只对每个元素调用 std::get<i>(result)。这样，所有执行时间都在有效范围内，也没有抛出任何异常，因此我们可以得到所有执行协程的结果。
+
+如果抛出异常，那么我们将不会得到任何值：
+
+\begin{cpp}
+try {
+    auto result throw = co_await
+    boost::cobalt::join(process(100ms),
+                        process(20000ms),
+                        process(300ms));
+}
+catch (...) {
+    std::cout << "An exception was thrown\n";
+}
+\end{cpp}
+
+上述代码将抛出异常，因为第二个协程收到的处理时间超出了有效范围。它将打印一条错误消息。
+
+当调用 join 函数时，我们希望所有协程都被视为处理的一部分，并且如果发生异常，则整个处理失败。
+
+如果我们需要获取每个协程的所有结果，我们将使用 gather 函数：
+
+\begin{cpp}
+try{
+    auto result throw =
+    boost::cobalt::co_await lt::gather(process(100ms),
+                                       process(20000ms),
+                                       process(300ms));
+
+    if (std::get<0>(result throw).has value()) {
+        std::cout << "First coroutine took: "
+                  << *std::get<0>(result throw)
+                  << "msec\n";
+    }
+    else {
+        std::cout << "First coroutine threw an exception\n";
+    }
+    if (std::get<1>(result throw).has value()) {
+        std::cout << "Second coroutine took: "
+                  << *std::get<1>(result throw)
+                  << "msec\n";
+    }
+    else {
+        std::cout << "Second coroutine threw an exception\n";
+    }
+    if (std::get<2>(result throw).has value()) {
+        std::cout << "Third coroutine took: "
+                  << *std::get<2>(result throw)
+                  << "msec\n";
+    }
+    else {
+        std::cout << "Third coroutine threw an exception\n";
+    }
+}
+catch (...) {
+    // this is never reached because gather doesn't throw exceptions
+    std::cout << "An exception was thrown\n";
+}
+\end{cpp}
+
+我们把代码放在了 try-catch 块中，但没有抛出任何异常。 gather 函数返回一个可选值的元组，我们需要检查每个协程是否返回了一个值（可选值是否有值）。
+
+当我们希望协程在成功执行时返回一个值时，我们使用 gather。
+
+这些join 和gather函数的示例结束了我们对 Boost.Cobalt 同步函数的介绍。
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

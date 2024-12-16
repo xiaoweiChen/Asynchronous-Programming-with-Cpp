@@ -1,13 +1,431 @@
 
+本节介绍 C++ 内存模型及其处理并发性的方式。 C++ 内存模型随 C++11 一起提供，并定义了 C++ 中内存的两个主要特性：
 
-\mySubsubsection{5.4.1.}{Memory access order}
+\begin{itemize}
+\item
+对象在内存中的布局方式（即结构方面）。本书不涉及此主题，因为本书主要讨论异步编程。
 
-\mySubsubsection{5.4.2.}{Enforcing ordering}
+\item
+内存修改顺序（即并发方面）。我们将看到内存模型中指定的不同内存修改顺序。
+\end{itemize}
 
-\mySubsubsection{5.4.3.}{Sequential consistency}
+\mySubsubsection{5.4.1.}{内存访问顺序}
 
-\mySubsubsection{5.4.4.}{Acquire-release ordering}
+在我们解释 C++ 内存模型及其支持的不同内存顺序之前，让我们先澄清一下内存顺序的含义。内存顺序是指访问内存（即程序中的变量）的顺序。内存访问可以是读取或写入（加载和存储）。但是访问程序变量的实际顺序是什么？对于以下代码，有三个角度：编写的代码顺序、编译器生成的指令顺序，以及最后 CPU 执行指令的顺序。这三个顺序可以相同或（更可能）不同。
 
-\mySubsubsection{5.4.5.}{Relaxed memory ordering}
+第一个明显的顺序是代码中的顺序。以下代码片段就是一个例子：
+
+\begin{cpp}
+void func_a(int& a, int& b) {
+    a += 1;
+    b += 10;
+    a += 2;
+}
+\end{cpp}
+
+func\_a 函数首先将变量 a 加 1，然后将变量 b 加 10，最后将变量 a 加 2。这就是我们的意图，也是我们定义要执行的语句的顺序。
+
+编译器会将上述代码转换为汇编指令。如果代码执行结果不变，编译器可以改变语句的顺序，使生成的代码更高效。例如，对于上述代码，编译器可以先对变量 a 执行两次加法，然后对变量 b 执行加法，也可以简单地将 3 加到 a 上，然后将 10 加到 b 上。如前所述，如果结果相同，编译器可以做任何它想做的事情来优化代码。
+
+现在让我们考虑以下代码：
+
+\begin{cpp}
+void func_a(int& a, int& b) {
+    a += 1;
+    b += 10 + a;
+    a += 2;
+}
+\end{cpp}
+
+这种情况下，对b的操作依赖于之前对a的操作，所以编译器无法对语句进行重新排序，生成的代码会像我们写的代码一样（操作顺序相同）。
+
+CPU（本书使用的是现代 Intel x64 CPU）将运行生成的代码。它可以按不同的顺序执行编译器生成的指令。这称为无序执行。如果结果正确， CPU 也可以这样做。
+
+请参阅此链接以获取上述示例中显示的生成代码： \url{https://godbolt.org/z/Mhrcnsr9e}
+
+首先，为 func\_1 生成的指令显示出了优化：编译器通过将 3 添加到变量 a 中，将两个加法合并为一个。其次，为 func\_2 生成的指令与我们编写的 C++ 语句的顺序相同。在这种情况下， CPU 可以无序执行指令，因为操作之间没有依赖关系。
+
+总而言之，我们可以说 CPU 运行的代码可能与我们编写的代码不同（同样，假设执行结果与我们在编写的程序中预期的结果相同）。
+
+我们展示的所有示例都适用于在单线程中运行的代码。代码指令可能会根据编译器优化和 C PU 无序执行以不同的顺序执行，但结果仍然正确。
+
+有关无序执行的示例请参阅以下代码：
+
+\begin{cpp}
+mov eax, [var1] ; load variable var1 into reg eax
+inc eax ; eax += 1
+mov [var1], eax ; store reg eax into var1
+xor ecx, ecx ; ecx = 0
+inc ecx ; ecx += 1
+add eax, ecx ; eax = eax + ecx
+\end{cpp}
+
+CPU 可以按照上述代码中显示的顺序执行指令，即加载 var1 [1]。然后，在读取变量时，它可以发出一些后面的指令，例如 [4] 和 [5]，然后，一旦读取了 var1，就执行 [2]，然后是 [3] ，最后是 [6]。指令的执行顺序不同，但结果仍然相同。这是一个典型的乱序执行示例： CP U 发出加载指令，而不是等待数据可用，而是尽可能执行一些其他指令，以避免空闲并最大限度地提高性能。
+我们提到的所有优化（编译器和 CPU 都一样）都是在不考虑线程间交互的情况下进行的。
+
+编译器和 CPU 都不知道不同的线程。在这些情况下，我们需要告诉编译器它能做什么和不能做什么。原子操作和锁就是实现这一点的方法。
+
+例如，当我们使用原子变量时，我们可能不仅要求操作是原子的，而且还要求操作遵循一定的顺序，以便代码在运行多个线程时正常工作。这不能仅由编译器或 CPU 来完成，因为它们都没有涉及多个线程的任何信息。为了指定我们要使用的顺序， C++ 内存模型提供了不同的选项：
+
+\begin{itemize}
+\item
+宽松排序： std::memory\_order\_relaxed
+
+\item
+获取和释放顺序： std::memory\_order\_acquire、 std::memory\_order\_release、 std::memory\_order\_acq\_rel 和 std::memory\_order\_consume
+
+\item
+顺序一致性排序： std::memory\_order\_seq\_cst
+\end{itemize}
+
+C++ 内存模型定义了一个抽象机器，以实现与任何特定 CPU 的独立性。但是， CPU 仍然存在，并且内存模型中可用的功能可能不适用于特定 CPU。例如， Intel x64 架构非常严格，并且强制执行相当严格的内存顺序。
+
+Intel x64 架构使用按处理器排序的内存排序模型，该模型可定义为按存储缓冲区转发进行写入排序。在单处理器系统中，内存排序模型遵循以下原则：
+
+\begin{itemize}
+\item
+读取不会与任何读取重新排序
+
+\item
+写入不会与任何写入重新排序
+
+\item
+写入不会与较早的读取重新排序
+
+\item
+读取可能会与较旧的写入重新排序（如果要重新排序的读取和写入涉及不同的内存位置）
+
+\item
+读取和写入不会使用锁定（原子）指令重新排序
+\end{itemize}
+
+英特尔手册中有更多详细信息（请参阅章节末尾的参考资料），但前面的原则是最相关的。
+
+在多处理器系统中，适用以下原则：
+
+\begin{itemize}
+\item
+每个单独的处理器都使用与单处理器系统相同的排序原则
+
+\item
+所有处理器都会以相同的顺序观察单个处理器的写入
+
+\item
+单个处理器的写入相对于其他处理器的写入没有排序
+
+\item
+记忆排序遵循因果关系
+
+\item
+除了执行该存储的处理器之外，其他处理器都以一致的顺序看待任何两个存储
+
+\item
+锁定（原子）指令具有完全顺序
+\end{itemize}
+
+Intel 架构是严格有序的；每个处理器的存储操作（写入指令）都以执行顺序被其他处理器观察到，并且每个处理器都按照程序中出现的顺序执行存储。这称为“全存储排序”（TSO ）。
+
+ARM 架构支持弱排序（WO）。这些是主要的原则：
+
+\begin{itemize}
+\item
+读取和写入可以无序执行。与 TSO 不同，正如我们所见，除了写入不同地址后读取之外，没有本地重新排序，而 ARM 架构允许本地重新排序（除非使用特殊指令另行指定）。
+
+\item
+与在英特尔架构中不同，写入操作不能保证同时对所有线程可见。
+
+\item
+总的来说，这种相对不受限制的内存排序允许核心更自由地重新排序指令，从而有可能提高多核性能。
+\end{itemize}
+
+我们必须在此指出，内存顺序越宽松，就越难推断执行的代码，并且使用原子操作正确同步多个线程也就越有挑战性。此外，您应该记住，无论内存顺序如何，原子性始终得到保证。
+
+在本节中，我们了解了访问内存时的顺序是什么意思，以及我们在代码中指定的顺序可能与 CPU 执行代码的顺序不同。在下一节中，我们将了解如何使用原子类型和操作来强制执行某些顺序。
+
+\mySubsubsection{5.4.2.}{强制订购}
+
+我们已经在第 4 章和本章前面看到，从不同线程执行的对同一内存地址的非原子操作可能会导致数据争用和未定义的行为。为了强制线程之间操作的顺序，我们将使用原子类型及其操作。本节将探讨原子在多线程代码中的使用效果。
+
+以下简单示例将帮助我们了解原子操作可以做什么：
+
+\begin{cpp}
+#include <atomic>
+#include <chrono>
+#include <iostream>
+#include <string>
+#include <thread>
+
+std::string message;
+std::atomic<bool> ready{false};
+
+void reader() {
+    using namespace std::chrono::literals;
+
+    while (!ready.load()) {
+        std::this_thread::sleep_for(1ms);
+    }
+
+    std::cout << "Message received = " << message << std::endl;
+}
+
+void writer() {
+    message = "Hello, World!";
+    ready.store(true);
+}
+
+int main() {
+    std::thread t1(reader);
+    std::thread t2(writer);
+
+    t1.join();
+    t2.join();
+
+    return 0;
+}
+\end{cpp}
+
+在此示例中， reader() 等待 ready 变量为真，然后打印由 writer() 设置的消息。 writer() 函数设置消息，然后将 store 变量设置为真。
+
+原子操作为我们提供了两个功能，用于在多线程代码中强制执行特定的执行顺序：
+
+\begin{itemize}
+\item
+发生在之前：在上面的代码中， [1]（设置消息变量）发生在 [2]（将原子 ready 变量设置为 true）之前。此外， [3]（循环读取 ready 变量直到其为 true）发生在 [4]（打印消息）之前。在这种情况下，我们使用顺序一致性内存顺序（默认内存顺序）。
+
+\item
+同步：这只发生在原子操作之间。在上面的例子中，这意味着当 [1] 设置 ready 时，该值将对不同线程中的后续读取（或写入）可见（当然，它在当前线程中可见），并且当[3] 读取 ready 时，更改的值将可见。
+\end{itemize}
+
+现在我们已经了解了原子操作如何强制从不同线程进行内存访问顺序，让我们详细了解 C ++ 内存模型提供的每个内存顺序选项。
+
+在我们开始之前，让我们记住， Intel x64 架构（Intel 和 AMD 台式机处理器）在内存顺序方面非常严格，不需要任何额外的获取/释放指令，并且顺序一致性在性能成本方面很便宜。
+
+\mySubsubsection{5.4.3.}{顺序一致性}
+
+顺序一致性保证程序按照您编写的方式执行。 1979 年， Leslie Lamport 将顺序一致性定义为“执行结果与读取和写入按某种顺序发生的结果相同，并且每个处理器的操作都按照其程序指定的顺序按此顺序出现。”
+
+在 C++ 中，使用 std::memory\_order\_seq\_cst 选项指定顺序一致性。这是最严格的内存顺序，也是默认顺序。如果未指定排序选项，则将使用顺序一致性。
+
+C++ 内存模型默认确保在代码中不存在竞争条件的情况下顺序一致性。将其视为一个约定：如果我们正确同步程序以防止竞争条件， C++ 将保持程序按编写顺序执行的外观。
+
+在这个模型中，所有线程都必须看到相同的操作顺序。只要计算的可见结果与无序代码的结果相同，操作仍然可以重新排序。如果读取和写入的顺序与编译代码中的顺序相同，则可以重新排序指令和操作。如果依赖关系得到满足， CPU 可以自由地在读取和写入之间重新排序任何其他指令。由于它定义的一致顺序，顺序一致性是最直观的排序形式。为了说明顺序一致性，让我们考虑以下示例：
+
+\begin{cpp}
+#include <atomic>
+#include <chrono>
+#include <iostream>
+#include <thread>
+
+std::atomic<bool> x{ false };
+std::atomic<bool> y{ false };
+std::atomic<int> z{ 0 };
+
+void write_x() {
+    x.store(true, std::memory_order_seq_cst);
+}
+
+void write_y() {
+    y.store(true, std::memory_order_seq_cst);
+}
+
+void read_x_then_y() {
+    while (!x.load(std::memory_order_seq_cst)) {}
+    if (y.load(std::memory_order_seq_cst)) {
+        ++z;
+    }
+}
+
+void read_y_then_x()
+{
+    while (!y.load(std::memory_order_seq_cst)) {}
+    if (x.load(std::memory_order_seq_cst)) {
+        ++z;
+    }
+}
+
+int main() {
+    std::thread t1(write_x);
+    std::thread t2(write_y);
+    std::thread t3(read_x_then_y);
+    std::thread t4(read_y_then_x);
+
+    t1.join();
+    t2.join();
+    t3.join();
+    t4.join();
+
+    if (z.load() == 0) {
+        std::cout << "This will never happen\n";
+    }
+    {
+        std::cout << "This will always happen and z = " << z << "\n";
+    }
+
+    return 0;
+}
+\end{cpp}
+
+因为我们在运行代码时使用的是 std::memory\_order\_seq\_cst，所以我们应该注意以下几点：
+
+\begin{itemize}
+\item
+每个线程中的操作都按照给定的顺序执行（不重新排序原子操作）。
+
+\item
+t1 和 t2 按顺序更新 x 和 y， t3 和 t4 看到的也是同样的顺序。如果没有这个属性， t3 可以看到 x 和 y 按顺序变化，但 t4 看到的却是相反的顺序。
+
+\item
+任何其他顺序都可能打印这种情况永远不会发生，因为 t3 和 t4 可以以相反的顺序看到x 和 y 的变化。我们将在下一节中看到一个例子。
+\end{itemize}
+
+本例中的顺序一致性意味着会发生以下两件事：
+
+\begin{itemize}
+\item
+所有线程都可以看到每个存储操作；也就是说，每个存储操作都与每个变量的所有加载操作同步，并且所有线程都以相同的顺序看到这些更改
+
+\item
+每个线程的操作都以相同的顺序发生（操作按照与代码相同的顺序运行）
+\end{itemize}
+
+请注意，不同线程中操作之间的顺序无法保证，并且由于线程可能被调度，因此不同线程中的指令可能会按任何顺序执行。
+
+\mySubsubsection{5.4.4.}{获取-释放顺序}
+
+获取-释放顺序的严格程度不如顺序一致性顺序。我们无法获得顺序一致性顺序中操作的完全顺序，但仍可以进行一些同步。一般来说，随着我们为内存排序增加更多自由度，我们可能会看到性能提升，但推断代码的执行顺序将变得更加困难。
+
+在该排序模型中，原子加载操作是 std::memory\_order\_acquire 操作，原子存储操作是 std::memory\_order\_release 操作，原子读取-修改-写入操作可能是 std::memory\_order\_acquire、 std::memory\_order\_release 或 std::memory\_order\_acq\_rel 操作。
+
+获取语义（与 std::memory\_order\_acquire 一起使用）确保在源代码中出现在获取操作之后的一个线程中的所有读取或写入操作都发生在获取操作之后。这可以防止内存对获取操作之后的读取和写入进行重新排序。
+
+释放语义（与 std::memory\_order\_release 一起使用）确保在源代码中出现在释放操作之前的某个线程中的读取或写入操作在释放操作之前完成。这可防止在释放操作之后的读取和写入发生内存重新排序。
+
+下面的示例显示了与上一节关于顺序一致性的代码相同的代码，但在这种情况下，我们对原子操作使用获取-释放内存顺序：
+
+\begin{cpp}
+#include <atomic>
+#include <chrono>
+#include <iostream>
+#include <thread>
+
+std::atomic<bool> x{ false };
+std::atomic<bool> y{ false };
+std::atomic<int> z{ 0 };
+
+void write_x() {
+    x.store(true, std::memory_order_release);
+}
+
+void write_y() {
+    y.store(true, std::memory_order_release);
+}
+
+void read_x_then_y() {
+    while (!x.load(std::memory_order_acquire)) {}
+    if (y.load(std::memory_order_acquire)) {
+        ++z;
+    }
+}
+
+void read_y_then_x() {
+    while (!y.load(std::memory_order_acquire)) {}
+    if (x.load(std::memory_order_acquire)) {
+        ++z;
+    }
+}
+
+int main() {
+    std::thread t1(write_x);
+    std::thread t2(write_y);
+    std::thread t3(read_x_then_y);
+    std::thread t4(read_y_then_x);
+
+    t1.join();
+    t2.join();
+    t3.join();
+    t4.join();
+
+    if (z.load() == 0) {
+        std::cout << "This will never happen\n";
+    } {
+        std::cout << "This will always happen and z = " << z << "\n";
+    }
+
+    return 0;
+}
+\end{cpp}
+
+在这种情况下， z 的值可能为 0。因为在 t1 将 x 设置为 true 并且 t2 将 y 设置为 true 之后，我们不再具有顺序一致性，所以 t3 和 t4 对内存访问的执行方式可能有不同的看法。由于使用了获取-释放内存顺序， t3 可能认为 x 为 true 而 y 为 false（请记住，没有强制顺序），而t4 可能认为 x 为 false 而 y 为 true。发生这种情况时， z 的值将为 0。
+
+除了 std::memory\_order\_acquire、 std::memory\_order\_release 和 std::memory\_order\_acq\_rel 之外，获取-释放内存顺序还包括 std::memory\_order\_consume 选项。我们不会描述它，因为根据在线 C++ 参考，“释放-消耗顺序的规范正在修订，暂时不鼓励使用 std::memory\_order\_consume。”
+
+\mySubsubsection{5.4.5.}{宽松的内存排序}
+
+为了以宽松的内存排序执行原子操作，我们指定 std::memory\_order\_relaxed 作为内存排序选项。
+
+宽松内存排序是最弱的同步形式。它提供两项保证：
+
+\begin{itemize}
+\item
+操作的原子性。
+
+\item
+单个线程中对同一原子变量的原子操作不会重新排序。这称为修改顺序一致性。但是，无法保证其他线程将以相同的顺序看到这些操作。
+\end{itemize}
+
+让我们考虑以下场景：一个线程 (th1) 将值存储到原子变量中。经过一段随机的时间间隔后，该变量将被新的随机值覆盖。为了便于说明，我们假设写入的序列为 2、 12、 23、 4、 6。
+
+另一个线程 th2 定期读取同一变量。第一次读取变量时， th2 得到的值是 23。请记住，该变量是原子的，并且加载和存储操作都是使用宽松的内存顺序完成的。
+
+如果 th2 再次读取该变量，它可以获取相同的值，也可以获取在之前读取的值之后写入的任何值。它不能读取之前写入的任何值，因为修改顺序一致性属性会被违反。在当前示例中，第二次读取可能获取 23、 4 或 6，但不会获取 2 或 12。如果我们获取 4， th1 将继续写入8、 19 和 7。现在 th2 可能获取 4、 6、 8、 19 或 7，但不会获取 4 之前的任何数字，依此类推。
+
+在两个或多个线程之间，不保证任何顺序，但是一旦读取了一个值，就无法读取先前写入的值。
+
+放松模型不能用于同步线程，因为没有可见性顺序保证，但它在操作不需要在线程之间紧密协调的场景中很有用，这可以提高性能。
+
+当执行顺序不影响程序的正确性时，使用它通常是安全的，例如用于统计的递增计数器或参考计数器，其中递增的确切顺序并不重要。
+
+在本节中，我们了解了 C++ 内存模型，以及它如何允许具有不同内存顺序约束的原子操作的排序和同步。在下一节中，我们将看到 C++ 标准库提供的原子类型和操作。
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 

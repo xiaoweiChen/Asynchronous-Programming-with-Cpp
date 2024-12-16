@@ -1,16 +1,755 @@
 
+Sanitizer 是 Google 最初开发的用于检测和预防代码中各类问题或安全漏洞的工具，帮助开
+发人员在开发过程早期发现错误，减少问题后期修复的成本，提高软件的稳定性和安全性
+。
 
+Sanitizer 通常集成到开发环境中，并且通常在手动测试期间或运行单元测试、持续集成 (CI)
+管道或代码审查管道时启用。
 
-\mySubsubsection{12.2.1.}{Compiler options}
+C++ 编译器（例如 GCC 和 Clang）具有编译器选项，可在构建程序时生成代码，以跟踪运
+行时的执行情况并报告错误和漏洞。它们在 Clang 3.1 版和 GCC 4.8 版中实现。
 
-\mySubsubsection{12.2.2.}{AddressSanitizer}
+由于额外的指令被注入到程序的二进制代码中，因此根据清理器的类型，性能会降低大约 1
+.5 倍到 4 倍。此外，总内存开销为 2 倍到 4 倍，堆栈大小最多增加 3 倍。但请注意，与使
+用其他检测框架或动态分析工具（例如 Valgrind (\url{https://valgrind.org})）时遇到的减速相比，
+减速要低得多，后者造成的减速要比生产二进制文件慢 50 倍。另一方面，使用 Valgrind 的
+好处是不需要重新编译。这两种方法都只在程序运行时检测问题，并且只在执行遍历的代
+码路径上检测问题。因此，我们需要确保足够的覆盖范围。
+还有静态分析工具和 linters，可用于检测编译过程中的问题并检查程序中包含的所有代码。
+例如， GCC 和 Clang 等编译器可以通过启用 -Werror、-Wall 和 -pedantic 选项来执行额
+外检查并提供有用的信息。
+
+还有一些开源替代方案，例如 Cppcheck 或 Flawfinder，或者对开源项目免费的商业解决方
+案，例如 PVS-Studio 或 Coverity Scan。其他解决方案，例如 SonarQube、 CodeSonar 或 OCL
+int，可用于持续集成/持续交付 (CI/CD) 管道，以进行持续质量跟踪。
+
+在本节中，我们将重点介绍清理器，可以通过向编译器传递一些特殊选项来启用它。
+
+\mySubsubsection{12.2.1.}{编译器选项}
+
+为了启用清理器，我们需要在编译程序时传递一些编译器选项。
+
+主要选项是 -{}-fsanitize=sanitizer\_name，其中 sanitizer\_name 是以下选项之一：
+
+\begin{itemize}
+\item
+address：这是 AddressSanitizer (ASan)，用于检测内存错误，例如缓冲区溢出和释放后使用错误
+
+\item
+线程：这是针对 ThreadSanitizer (TSan) 的，通过监视线程交互来识别多线程程序中的数据争用和其他线程同步问题
+
+\item
+泄漏：这是 LeakSanitizer (LSan) 的功能，通过跟踪内存分配并确保正确释放所有分配的内存来发现内存泄漏
+
+\item
+内存：这是 MemorySanitizer (MSan)，用于发现未初始化内存的使用情况
+
+\item
+undefined：这是 UndefinedBehaviorSanitizer (UBSan)，用于检测未定义的行为，例如整数溢出、无效类型转换和其他错误操作
+\end{itemize}
+
+Clang 还包括数据流、 cfi（控制流完整性）、 safe\_stack 和 realtime。
+
+GCC 添加了 kernel-address、 hwaddress、 kernel-hwaddress、 pointer-compare、 pointer-subtract 和 shadow-call-stack。
+
+由于此列表和标志行为会随着时间而改变，建议检查编译器的官方文档。
+
+可能需要额外的标志：
+
+\begin{itemize}
+\item
+-fno-omit-frame-pointer：帧指针是编译器用来跟踪当前堆栈帧的寄存器，其中包含当前
+函数的基址等信息。省略帧指针可能会提高程序的性能，但代价是调试难度大大增加；
+它使定位局部变量和重建堆栈跟踪变得更加困难。
+
+\item
+-g：在警告消息中包含调试信息并显示文件名和行号。如果使用调试器 GDB，则可能需要使用 -ggdb 选项，因为编译器可以生成更具表现力的符号以供调试时使用。此外，可以使用 –g[level] 指定级别，其中 [level] 是 0 到 3 之间的值，每增加一个级别就会添加更多调试信息。默认级别为 2。
+
+\item
+-fsanitize-recover：这些选项使清理程序尝试继续运行程序，就好像没有检测到错误一样。
+
+\item
+-fno-sanitize-recover：清理程序将仅检测第一个错误，并且程序将以非零退出代码退出。
+\end{itemize}
+
+为了保持合理的性能，我们可能需要通过指定 -O[num] 选项来调整优化级别。不同的清理
+程序在达到一定优化级别之前效果最佳。最好从 -O0 开始，如果速度明显下降，则尝试增
+加到 -O1、-O2 等等。此外，由于不同的清理程序和编译器会推荐特定的优化级别，请
+查看其文档。
+
+在使用 Clang 时，为了使堆栈跟踪易于理解并让清理器将地址转换为源代码位置，除了使用
+前面提到的标志外，我们还可以将特定的环境变量 [X]SAN\_SYMBOLIZER\_PATH 设置为 ll
+vm-symbolizer 的位置（其中 [X] 为 AddressSatinizer 的 A、 LSan 的 L、 MSan 的 M，依此类推）。我们还可以将此位置包含在 PATH 环境变量中。以下是使用 AddressSatinizer 时设置
+PATH 变量的示例：
+
+\begin{shell}
+export ASAN_SYMBOLIZER_PATH=`which llvm-symbolizer`
+export PATH=$ASAN_SYMBOLIZER_PATH:$PATH
+\end{shell}
+
+请注意，使用某些清理程序启用 -Werror 可能会导致误报。此外，可能需要其他编译器标
+志，但执行期间的警告消息将显示问题正在发生，并且显然需要标志。查看清理程序和编
+译器的文档，以了解在这些情况下应使用哪个标志。
+
+\mySamllsubsection{避免消杀部分代码}
+
+有时，我们可能希望消除某些清理程序警告并跳过清理某些函数，原因如下：这是一个众
+所周知的问题、该函数是正确的、这是一个误报、该函数需要加速，或者这是第三方库中
+的问题。在这些情况下，我们可以使用抑制文件或使用一些宏指令排除代码区域。还有一
+个黑名单机制，但由于它已被弃用，取而代之的是抑制文件；我们不会在这里评论它。
+
+使用抑制文件，我们只需创建一个文本文件，列出我们不希望杀毒程序运行的代码区域。
+每一行都由遵循特定格式的模式组成，具体取决于杀毒程序，但通常结构如下：
+
+\begin{shell}
+type:location_pattern
+\end{shell}
+
+此处， type 表示抑制的类型，例如泄漏和竞争值， location\_pattern 是与要抑制的函数或库名
+称匹配的正则表达式。以下是 ASan 抑制文件的示例，下一节将对此进行解释：
+
+\begin{shell}
+# Suppress known memory leaks in third-party function Func1 in library
+Lib1
+leak:Lib1::Func1
+# Ignore false-positive from function Func2 in library Lib2
+race:Lib2::Func2
+# Suppress issue from libc
+leak:/usr/lib/libc.so.*
+\end{shell}
+
+我们将此文件命名为 myasan.supp。然后，编译此抑制文件并通过 [X]SAN\_OPTIONS 将其
+传递给清理程序，如下所示：
+
+\begin{shell}
+$ clang++ -O0 -g -fsanitize=address -fno-omit-frame-pointer test.cpp -o test
+$ ASAN_OPTIONS=suppressions=myasan.supp ./test
+\end{shell}
+
+我们还可以在源代码中使用宏来排除要清理的特定函数，方法是使用 \verb|__attribute__((no_sanitize("<sanitizer_name>")))| ，如下所示：
+
+\begin{cpp}
+#if defined(__clang__) || defined (__GNUC__)
+# define ATTRIBUTE_NO_SANITIZE_ADDRESS __attribute__((no_sanitize_
+address))
+#else
+# define ATTRIBUTE_NO_SANITIZE_ADDRESS
+#endif
+...
+ATTRIBUTE_NO_SANITIZE_ADDRESS
+void ThisFunctionWillNotBeInstrumented() {...}
+\end{cpp}
+
+该技术提供了对清理器应检测的内容的细粒度编译时控制。
+
+现在让我们来探索最常见的代码清理器类型，从最相关的检查地址误用类型开始。
+
+\mySubsubsection{12.2.2.}{地址消杀器}
+
+ASan 的目的是检测由于数组越界访问期间的缓冲区溢出（堆、堆栈和全局）、使用通过释
+放或删除操作释放的内存块以及其他内存泄漏而发生的内存相关错误。
+
+除了设置 -fsanitize=address 和之前推荐的其他标志之外，我们还可以使用 –fsanitize-address-use-after-scope 来检测超出范围后使用的内存，或者设置 \verb|ASAN_OPTIONS=option detect_stack_use_after_return=1| 环境变量来检测返回后的使用情况。
+
+ASAN\_OPTIONS 还可用于指示 ASan 打印堆栈跟踪或设置日志文件，如下所示：
+
+\begin{shell}
+ASAN_OPTIONS=detect_stack_use_after_return=1,print_stacktrace=1,log_path=asan.log
+\end{shell}
+
+Linux 上的 Clang 完全支持 ASan，其次是 Linux 上的 GCC。默认情况下， ASan 被禁用，因
+为它会增加额外的运行时开销。
+
+此外， ASan 还会处理对 glibc 的所有调用 -glibc 是 GNU C 库，为 GNU 系统提供核心库。
+但是，其他库并非如此，因此建议使用 –fsanitize=address 选项重新编译此类库。如前所述
+，使用 Valgrind 不需要重新编译。
+
+ASan 可以与 UBSan 结合使用，我们稍后会看到，但它会使性能降低约 50\%。
+
+如果我们想要更积极的诊断清理，我们可以使用以下标志组合：
+
+\begin{shell}
+ASAN_OPTIONS=strict_string_checks=1:detect_stack_use_after_return=1:check_initialization_order=1:strict_init_order=1
+\end{shell}
+
+让我们看两个使用 ASan 检测常见软件问题的例子，分别是内存释放后使用和检测缓冲区溢
+出。
+
+\mySamllsubsection{释放后的内存使用情况}
+
+软件中一个常见的问题是释放内存后仍使用内存。在此示例中，堆中分配的内存在删除后
+仍被使用：
+
+\begin{cpp}
+#include <iostream>
+#include <memory>
+
+int main() {
+    auto arr = new int[100];
+    delete[] arr;
+    std::cout << "arr[0] = " << arr[0] << '\n';
+    return 0;
+}
+\end{cpp}
+
+假设上述源代码位于名为 test.cpp 的文件中。要启用 ASan，我们只需使用以下命令编译该
+文件：
+
+\begin{shell}
+$ clang++ -fsanitize=address -fno-omit-frame-pointer -g -O0 –o test test.cpp
+\end{shell}
+
+然后，执行结果输出测试程序，我们得到以下输出（注意，输出是简化的，只显示相关内
+容，并且可能因不同的编译器版本和执行上下文而有所不同）：
+
+\begin{shell}
+ERROR: AddressSanitizer: heap-use-after-free on address 0x514000000040
+at pc 0x63acc82a0bec bp 0x7fff2d096c60 sp 0x7fff2d096c58
+READ of size 4 at 0x514000000040 thread T0
+    #0 0x63acc82a0beb in main test.cpp:7:31
+0x514000000040 is located 0 bytes inside of 400-byte region
+[0x514000000040,0x5140000001d0)
+freed by thread T0 here:
+    #0 0x63acc829f161 in operator delete[](void*) (/
+mnt/StorePCIE/Projects/Books/Packt/Book/Code/build/bin/
+Chapter_11/11x02-ASAN_heap_use_after_free+0x106161) (BuildId:
+7bf8fe6b1f86a8b587fbee39ae3a5ced3e866931)
+previously allocated by thread T0 here:
+    #0 0x63acc829e901 in operator new[](unsigned long) (/
+mnt/StorePCIE/Projects/Books/Packt/Book/Code/build/bin/
+Chapter_11/11x02-ASAN_heap_use_after_free+0x105901) (BuildId:
+7bf8fe6b1f86a8b587fbee39ae3a5ced3e866931)
+SUMMARY: AddressSanitizer: heap-use-after-free test.cpp:7:31 in main
+\end{shell}
+
+输出显示已应用 ASan 并检测到堆释放后使用错误。此错误发生在 T0 线程（主线程）中。
+输出还指向分配并随后释放该内存区域的代码及其大小（400 字节区域）。
+
+这些错误不仅发生在堆内存中，还发生在堆栈或全局区域中分配的内存区域。 ASan 可用于
+检测这些类型的问题，例如内存溢出。
+
+\mySamllsubsection{内存溢出}
+
+内存溢出（也称为缓冲区溢出或超限）发生在当某些数据写入超出缓冲区分配内存的内存
+地址时。
+
+以下示例显示了堆内存溢出：
+
+\begin{cpp}
+#include <iostream>
+
+int main() {
+    auto arr = new int[100];
+    arr[0] = 0;
+    int res = arr[100];
+    std::cout << "res = " << res << '\n';
+    delete[] arr;
+    return 0;
+}
+\end{cpp}
+
+编译并运行生成的程序后，输出如下：
+
+\begin{shell}
+ERROR: AddressSanitizer: heap-buffer-overflow on address
+0x5140000001d0 at pc 0x582953d2ac07 bp 0x7ffde9d58910 sp
+0x7ffde9d58908
+READ of size 4 at 0x5140000001d0 thread T0
+    #0 0x582953d2ac06 in main test.cpp:6:13
+0x5140000001d0 is located 0 bytes after 400-byte region
+[0x514000000040,0x5140000001d0)
+allocated by thread T0 here:
+    #0 0x582953d28901 in operator new[](unsigned long) (test+0x105901)
+(BuildId: 82a16fc86e01bc81f6392d4cbcad0fe8f78422c0)
+    #1 0x582953d2ab78 in main test.cpp:4:14
+(test+0x2c374) (BuildId: 82a16fc86e01bc81f6392d4cbcad0fe8f78422c0)
+SUMMARY: AddressSanitizer: heap-buffer-overflow test.cpp:6:13 in main
+\end{shell}
+
+从输出中我们可以看到，现在 ASan 在访问超出 400 字节区域（arr 变量）的内存地址时，
+主线程（T0）中会报告堆缓冲区溢出错误。
+
+集成到 ASan 中的清理器是 LSan。现在让我们学习如何使用此清理器检测内存泄漏。
 
 \mySubsubsection{12.2.3.}{LeakSanitizer}
 
+LSan 用于检测在分配内存但未正确释放时发生的内存泄漏。
+
+LSan 集成到 ASan 中，在 Linux 系统上默认启用。在 macOS 上可以使用 ASAN\_OPTIONS=detect\_leaks=1 启用它。要禁用它，只需设置 detect\_leaks=0。
+
+如果使用 -fsanitize=leak 选项，程序将链接到支持 LSan 的 ASan 子集，从而禁用编译时检测并减少 ASan 减速。请注意，此模式的测试不如默认模式那么充分。
+
+我们来看一个内存泄漏的例子：
+
+\begin{cpp}
+#include <string.h>
+#include <iostream>
+#include <memory>
+
+int main() {
+    auto arr = new char[100];
+    strcpy(arr, "Hello world!");
+    std::cout << "String = " << arr << '\n';
+    return 0;
+}
+\end{cpp}
+
+在此示例中，分配了 100 个字节（arr 变量）但从未释放。
+
+要启用 LSan，我们只需使用以下命令编译文件：
+
+\begin{shell}
+$ clang++ -fsanitize=leak -fno-omit-frame-pointer -g -O2 –o test test.cpp
+\end{shell}
+
+运行生成的测试二进制文件，我们得到以下结果：
+
+\begin{shell}
+ERROR: LeakSanitizer: detected memory leaks
+Direct leak of 100 byte(s) in 1 object(s) allocated from:
+    #0 0x5560ba9a017c in operator new[](unsigned long) (test+0x3417c)
+(BuildId: 2cc47a28bb898b4305d90c048c66fdeec440b621)
+    #1 0x5560ba9a2564 in main test.cpp:6:16
+SUMMARY: LeakSanitizer: 100 byte(s) leaked in 1 allocation(s).
+\end{shell}
+
+LSan 正确报告，使用运算符 new 分配了 100 字节的内存区域，但从未被删除。
+
+由于本书探讨了多线程和异步编程，我们现在来学习一种用于检测数据竞争和其他线程问题的清理器： TSan。
+
 \mySubsubsection{12.2.4.}{ThreadSanitizer}
+
+TSan 用于检测线程问题，尤其是数据争用和同步问题。它不能与 ASan 或 LSan 结合使用。
+TSan 是最符合本书内容的清理工具。
+
+通过指定 -fsanitize=thread 编译器选项可以启用此清理程序，并且可以使用 TSAN\_OPTIONS 环境变量修改其行为。例如，如果我们想在第一个错误后停止，只需使用以下命令：
+
+\begin{shell}
+TSAN_OPTIONS=halt_on_error=1
+\end{shell}
+
+此外，为了获得合理的性能，请使用编译器的 -O2 选项。
+
+TSan 仅报告运行时发生的竞争条件，因此它不会对未在运行时执行的代码路径中存在的竞争条件发出警报。因此，我们需要设计提供良好覆盖率并使用实际工作负载的测试。
+
+让我们看一些 TSan 检测数据竞争的示例。在下一个示例中，我们将使用全局变量（不使用互斥锁保护其访问）来执行此操作：
+
+\begin{cpp}
+#include <thread>
+
+int globalVar{0};
+
+void increase() {
+    globalVar++;
+}
+
+void decrease() {
+    globalVar--;
+}
+
+int main() {
+    std::thread t1(increase);
+    std::thread t2(decrease);
+
+    t1.join();
+    t2.join();
+
+    return 0;
+}
+\end{cpp}
+
+编译程序后，使用以下命令启用TSan：
+
+\begin{shell}
+$ clang++ -fsanitize=thread -fno-omit-frame-pointer -g -O2 –o test test.cpp
+\end{shell}
+
+运行结果程序将生成以下输出：
+
+\begin{shell}
+WARNING: ThreadSanitizer: data race (pid=31692)
+    Write of size 4 at 0x5932b0585ae8 by thread T2:
+        #0 decrease() test.cpp:10:12 (test+0xe0b32) (BuildId:
+895b75ef540c7b44daa517a874d99d06bd27c8f7)
+    Previous write of size 4 at 0x5932b0585ae8 by thread T1:
+        #0 increase() test.cpp:6:12 (test+0xe0af2) (BuildId:
+895b75ef540c7b44daa517a874d99d06bd27c8f7)
+    Thread T2 (tid=31695, running) created by main thread at:
+        #0 pthread_create <null> (test+0x6062f) (BuildId:
+895b75ef540c7b44daa517a874d99d06bd27c8f7)
+    Thread T1 (tid=31694, finished) created by main thread at:
+        #0 pthread_create <null> (test+0x6062f) (BuildId:
+895b75ef540c7b44daa517a874d99d06bd27c8f7)
+SUMMARY: ThreadSanitizer: data race test.cpp:10:12 in decrease()
+ThreadSanitizer: reported 1 warnings
+\end{shell}
+
+从输出中可以清楚地看出，在 increase() 中访问 globalVar 时存在数据竞争和duce()函数。
+
+如果我们决定使用 GCC 而不是 Clang，则运行生成的程序时可能会报告以下错误：
+
+\begin{shell}
+FATAL: ThreadSanitizer: unexpected memory mapping 0x603709d10000 - 0x603709d11000
+\end{shell}
+
+此内存映射问题是由称为地址空间布局随机化 (ASLR) 的安全功能引起的，这是操作系统使用的一种内存保护技术，通过随机化进程的地址空间来防止缓冲区溢出攻击。
+
+一个解决方案是使用以下命令来减少 ASLR：
+
+\begin{shell}
+$ sudo sysctl vm.mmap_rnd_bits=30
+\end{shell}
+
+如果错误仍然存在，可以进一步减少传递给 vm.mmap\_rnd\_bits 的值（上述命令中为 30）。
+
+要检查该值是否设置正确，只需运行以下命令：
+
+\begin{shell}
+$ sudo sysctl vm.mmap_rnd_bits
+vm.mmap_rnd_bits = 30
+\end{shell}
+
+请注意，此更改不是永久性的。因此，当机器重新启动时，其值将设置为默认值。要保留此更改，请将 m.mmap\_rnd\_bits=30 添加到 /etc/sysctl.conf。
+
+但这会降低系统的安全性，因此最好使用以下命令暂时禁用特定程序的 ASLR：
+
+\begin{shell}
+$ setarch `uname -m` -R ./test
+\end{shell}
+
+运行上述命令将显示与之前使用 Clang 编译时显示的类似的输出。
+
+让我们再看另一个示例，其中 std::map 对象在没有互斥锁的情况下被访问。即使访问 map 时使用了不同的键值，由于写入 std::map 会使它们的迭代器失效，因此可能会导致数据争用：
+
+\begin{cpp}
+#include <map>
+#include <thread>
+
+std::map<int,int> m;
+
+void Thread1() {
+    m[123] = 1;
+}
+
+void Thread2() {
+    m[345] = 0;
+}
+
+int main() {
+    std::jthread t1(Thread1);
+    std::jthread t2(Thread1);
+    return 0;
+}
+\end{cpp}
+
+编译并运行生成的二进制文件会产生大量输出，其中包含三个警告。这里，我们仅显示第一个警告中最相关的几行（其他警告类似）：
+
+\begin{shell}
+WARNING: ThreadSanitizer: data race (pid=8907)
+    Read of size 4 at 0x720c00000020 by thread T2:
+    Previous write of size 8 at 0x720c00000020 by thread T1:
+    Location is heap block of size 40 at 0x720c00000000 allocated by
+thread T1:
+    Thread T2 (tid=8910, running) created by main thread at:
+    Thread T1 (tid=8909, finished) created by main thread at:
+SUMMARY: ThreadSanitizer: data race test.cpp:11:3 in Thread2()
+\end{shell}
+
+当 t1 和 t2 线程都写入映射 m 时，会标记 TSan 警告。
+
+在下一个示例中，只有一个辅助线程通过指针访问映射，但此线程正在与主线程竞争访问和使用映射。 t 线程访问映射 m 以更改 foo 键的值；同时，主线程将其值打印到控制台：
+
+\begin{cpp}
+#include <iostream>
+#include <thread>
+#include <map>
+#include <string>
+
+typedef std::map<std::string, std::string> map_t;
+
+void *func(void *p) {
+    map_t& m = *static_cast<map_t*>(p);
+    m["foo"] = "bar";
+    return 0;
+}
+
+int main() {
+    map_t m;
+    std::thread t(func, &m);
+    std::cout << "foo = " << m["foo"] << '\n';
+    t.join();
+    return 0;
+}
+\end{cpp}
+
+编译并运行此示例会生成大量输出，其中包含七个 TSan 警告。这里，我们仅显示第一个警告。您可以通过编译并运行 GitHub 存储库中的示例来查看完整报告：
+
+\begin{shell}
+WARNING: ThreadSanitizer: data race (pid=10505)
+    Read of size 8 at 0x721800003028 by main thread:
+        #8 main test.cpp:17:28 (test+0xe1d75) (BuildId:
+8eef80df1b5c81ce996f7ef2c44a6c8a11a9304f)
+    Previous write of size 8 at 0x721800003028 by thread T1:
+        #0 operator new(unsigned long) <null> (test+0xe0c3b) (BuildId:
+8eef80df1b5c81ce996f7ef2c44a6c8a11a9304f)
+        #9 func(void*) test.cpp:10:3 (test+0xe1bb7) (BuildId:
+8eef80df1b5c81ce996f7ef2c44a6c8a11a9304f)
+    Location is heap block of size 96 at 0x721800003000 allocated by
+thread T1:
+        #0 operator new(unsigned long) <null> (test+0xe0c3b) (BuildId:
+8eef80df1b5c81ce996f7ef2c44a6c8a11a9304f)
+        #9 func(void*) test.cpp:10:3 (test+0xe1bb7) (BuildId:
+8eef80df1b5c81ce996f7ef2c44a6c8a11a9304f)
+    Thread T1 (tid=10507, finished) created by main thread at:
+        #0 pthread_create <null> (test+0x616bf) (BuildId:
+8eef80df1b5c81ce996f7ef2c44a6c8a11a9304f)
+SUMMARY: ThreadSanitizer: data race test.cpp:17:28 in main
+ThreadSanitizer: reported 7 warnings
+\end{shell}
+
+从输出来看， TSan 在访问堆中分配的 std::map 对象时发出数据争用警告。该对象是映射 m 。
+
+但是， TSan 不仅可以检测由于缺少互斥锁而导致的数据竞争，还可以报告变量何时必须是原子的。
+
+下一个示例展示了该场景。 RefCountedObject 类定义的对象可以保留已创建该类对象数量的引用计数。智能指针遵循此想法，当计数器达到值 0 时，在销毁时删除底层分配的内存。
+
+在此示例中，我们仅显示增加和减少引用计数变量 ref\_ 的 Ref() 和 Unref() 函数。为了避免在多线程环境中出现问题， ref\_ 必须是原子变量。但这里并非如此， t1 和 t2 线程正在修改 ref\_，可能会发生数据争用：
+
+\begin{cpp}
+#include <iostream>
+#include <thread>
+
+class RefCountedObject {
+public:
+
+    void Ref() {
+        ++ref_;
+    }
+
+    void Unref() {
+        --ref_;
+    }
+
+private:
+    // ref_ should be atomic to avoid synchronization issues
+    int ref_{0};
+};
+
+int main() {
+    RefCountedObject obj;
+    std::jthread t1(&RefCountedObject::Ref, &obj);
+    std::jthread t2(&RefCountedObject::Unref, &obj);
+    return 0;
+}
+\end{cpp}
+
+编译并运行此示例显示以下输出：
+
+\begin{shell}
+WARNING: ThreadSanitizer: data race (pid=32574)
+    Write of size 4 at 0x7fffffffcc04 by thread T2:
+        #0 RefCountedObject::Unref() test.cpp:12:9 (test+0xe1dd0)
+(BuildId: 448eb3f3d1602e21efa9b653e4760efe46b621e6)
+    Previous write of size 4 at 0x7fffffffcc04 by thread T1:
+        #0 RefCountedObject::Ref() test.cpp:8:9 (test+0xe1c00) (BuildId:
+448eb3f3d1602e21efa9b653e4760efe46b621e6)
+    Location is stack of main thread.
+    Location is global '??' at 0x7ffffffdd000 ([stack]+0x1fc04)
+    Thread T2 (tid=32577, running) created by main thread at:
+        #0 pthread_create <null> (test+0x6164f) (BuildId:
+448eb3f3d1602e21efa9b653e4760efe46b621e6)
+        #2 main test.cpp:23:16 (test+0xe1b94) (BuildId:
+448eb3f3d1602e21efa9b653e4760efe46b621e6)
+    Thread T1 (tid=32576, finished) created by main thread at:
+        #0 pthread_create <null> (test+0x6164f) (BuildId:
+448eb3f3d1602e21efa9b653e4760efe46b621e6)
+        #2 main test.cpp:22:16 (test+0xe1b56) (BuildId:
+448eb3f3d1602e21efa9b653e4760efe46b621e6)
+SUMMARY: ThreadSanitizer: data race test.cpp:12:9 in
+RefCountedObject::Unref()
+ThreadSanitizer: reported 1 warnings
+\end{shell}
+
+TSan 输出显示，在访问先前由 Ref() 函数修改的内存位置时， Unref() 函数中发生了数据竞争情况。
+
+数据竞争还可能发生在从多个线程初始化对象时，这些线程没有任何同步机制。在以下示例中，在 init\_object() 函数中创建了一个 MyObj 类型的对象，并为全局静态指针 obj 分配了其地址。由于此指针不受互斥锁保护，因此当 t1 和 t2 线程分别尝试从 func1() 和 func2() 函数创建对象并更新 obj 指针时，就会发生数据竞争：
+
+\begin{cpp}
+#include <iostream>
+#include <thread>
+
+class MyObj {};
+
+static MyObj *obj = nullptr;
+void init_object() {
+    if (!obj) {
+        obj = new MyObj();
+    }
+}
+
+void func1() {
+    init_object();
+}
+
+void func2() {
+    init_object();
+}
+
+int main() {
+    std::thread t1(func1);
+    std::thread t2(func2);
+
+    t1.join();
+    t2.join();
+    return 0;
+}
+\end{cpp}
+
+这是编译并运行该示例后的输出：
+
+\begin{shell}
+WARNING: ThreadSanitizer: data race (pid=32826)
+    Read of size 1 at 0x5663912cbae8 by thread T2:
+        #0 func2() test.cpp (test+0xe0b68) (BuildId:
+12f32c1505033f9839d17802d271fc869b7a3e38)
+    Previous write of size 1 at 0x5663912cbae8 by thread T1:
+        #0 func1() test.cpp (test+0xe0b3d) (BuildId:
+12f32c1505033f9839d17802d271fc869b7a3e38)
+    Location is global 'obj (.init)' of size 1 at 0x5663912cbae8
+(test+0x150cae8)
+    Thread T2 (tid=32829, running) created by main thread at:
+        #0 pthread_create <null> (test+0x6062f) (BuildId:
+12f32c1505033f9839d17802d271fc869b7a3e38)
+    Thread T1 (tid=32828, finished) created by main thread at:
+        #0 pthread_create <null> (test+0x6062f) (BuildId:
+12f32c1505033f9839d17802d271fc869b7a3e38)
+SUMMARY: ThreadSanitizer: data race test.cpp in func2()
+ThreadSanitizer: reported 1 warnings
+\end{shell}
+
+输出显示了我们之前描述的内容，由于 func1() 和 func2() 访问 obj 全局变量而发生数据竞争。
+
+由于 C++11 标准已正式将数据竞争视为未定义行为，现在让我们看看如何使用 UBSan 来检测程序中的未定义行为问题。
 
 \mySubsubsection{12.2.5.}{UndefinedBehaviorSanitizer}
 
+UBSan 可以检测代码中的未定义行为，例如，当位移位过多、整数溢出或误用空指针时。
+可以通过指定 -fsanitize=undefined 选项来启用它。可以通过设置 UBSAN\_OPTIONS 变量在运行时修改其行为。
+
+UBSan 能够检测到的许多错误在编译过程中也能被编译器检测到。
+
+我们来看一个简单的例子：
+
+\begin{cpp}
+int main() {
+    int val = 0x7fffffff;
+    val += 1;
+    return 0;
+}
+\end{cpp}
+
+要编译程序并启用 UBSan，请使用以下命令：
+
+\begin{shell}
+$ clang++ -fsanitize=undefined -fno-omit-frame-pointer -g -O2 –o test test.cpp
+\end{shell}
+
+运行结果程序将生成以下输出：
+
+\begin{shell}
+test.cpp:3:7: runtime error: signed integer overflow: 2147483647 + 1
+cannot be represented in type 'int'
+SUMMARY: UndefinedBehaviorSanitizer: undefined-behavior test.cpp:3:7
+\end{shell}
+
+输出非常简单且不言自明；有一个有符号整数溢出操作。
+
+现在让我们了解另一个有用的 C++ 清理器，用于检测未初始化的内存和其他内存使用问题： MSan。
+
 \mySubsubsection{12.2.6.}{MemorySanitizer}
 
-\mySubsubsection{12.2.7.}{Other sanitizers}
+MSan 可以检测未初始化的内存使用情况，例如，在使用尚未赋值或地址的变量或指针时。
+它还可以跟踪位域中未初始化的位。
+
+要启用 MSan，请使用以下编译器标志：
+
+\begin{shell}
+-fsanitize=memory -fPIE -pie -fno-omit-frame-pointer
+\end{shell}
+
+通过指定 -fsanitize-memory-track-origins 选项，它还可以跟踪每个未初始化值到其创建位置的内存分配。
+
+GCC 不支持 MSan，因此使用此编译器时 -fsanitize=memory 标志无效。
+
+在以下示例中，创建了 arr 整数数组，但仅初始化了其位置 5。将消息打印到控制台时将使用位置 0 处的值，但该值仍未初始化：
+
+\begin{cpp}
+#include <iostream>
+
+int main() {
+    auto arr = new int[10];
+    arr[5] = 0;
+    std::cout << "Value at position 0 = " << arr[0] << '\n';
+    return 0;
+}
+\end{cpp}
+
+要编译程序并启用MSan，请使用以下命令：
+
+\begin{shell}
+$ clang++ -fsanitize=memory -fno-omit-frame-pointer -g -O2 –o test test.cpp
+\end{shell}
+
+运行结果程序将生成以下输出：
+
+\begin{shell}
+==20932==WARNING: MemorySanitizer: use-of-uninitialized-value
+    #0 0x5b9fa2bed38f in main test.cpp:6:41
+    #3 0x5b9fa2b53324 in _start (test+0x32324) (BuildId:
+c0a0d31f01272c3ed59d4ac66b8700e9f457629f)
+SUMMARY: MemorySanitizer: use-of-uninitialized-value test.cpp:6:41 in
+main
+\end{shell}
+
+再次，输出清楚地显示，当读取 arr 数组中位置 0 的值时，第 6 行使用了未初始化的值。
+最后，我们在下一节中总结其他消杀器。
+
+\mySubsubsection{12.2.7.}{其他消杀器}
+
+还有其他可用的消杀器在针对某些系统进行开发（例如内核或实时开发）时很有用：
+
+\begin{itemize}
+\item
+硬件辅助 AddressSanitizer (HWASan)： ASan 的新变体，它利用硬件功能忽略指针的顶部字节，从而消耗更少的内存。可以通过指定 -fsanitize=hwaddress 选项来启用它。
+
+\item
+RealTimeSanitizer (RTSan)：实时测试工具，用于在具有确定性运行时要求的函数中调用不安全的方法时检测实时违规。
+
+\item
+FuzzerSanitizer：一种通过向程序输入大量随机数据、检查程序是否崩溃以及查找内存损坏或其他安全漏洞来检测潜在漏洞的清理器。
+
+\item
+与内核相关的清理程序：内核开发人员还可以使用清理程序来跟踪问题。出于好奇，下面列出了其中一些：
+
+\begin{itemize}
+\item
+内核地址消杀器 (Kernel Address Sanitizer, KASAN)
+
+\item
+内核并发消杀器 (Kernel Concurrency Sanitizer, KCSAN)
+
+\item
+内核电子栅栏 (Kernel Electric-Fence, KFENCE)
+
+\item
+内核内存消杀器 (Kernel Memory Sanitizer, KMSAN)
+
+\item
+内核线程消杀器 (Kernel Thread Sanitizer, KTSAN)
+\end{itemize}
+\end{itemize}
+
+Sanitizer 可以自动发现我们代码中的许多问题。一旦我们发现并调试了一些错误，并可以重现导致这些特定错误的场景，就可以方便地设计一些涵盖这些情况的测试，以避免将来更改代码而导致类似的问题或事件。
+
+在下一节中，我们将学习如何测试多线程和异步代码。
+

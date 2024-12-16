@@ -1,9 +1,142 @@
 
+在上一节中，我们看到了 C++ 标准库提供的不同类型的互斥锁。在本节中，我们将看到提供的类，以便更轻松地使用互斥锁。这是通过使用不同的包装器类来实现的。下表总结了锁管理类及其主要功能：
+
+% Please add the following required packages to your document preamble:
+% \usepackage{longtable}
+% Note: It may be necessary to compile the document several times to get a multi-page table to line up properly
+\begin{longtable}{|l|l|l|}
+\hline
+\textbf{互斥管理器类} & \textbf{支持的互斥锁类型}                                                          & \textbf{互斥对象管理} \\ \hline
+\endfirsthead
+%
+\endhead
+%
+std::lock\_guard  & 所有类型 & 1            \\ \hline
+std::scoped\_lock & 所有类型 & 零或更多 \\ \hline
+std::unique\_lock & 所有类型 & 1            \\ \hline
+std::shared\_lock            & \begin{tabular}[c]{@{}l@{}}std::shared\_mutex \\ std::shared\_timed\_mutex\end{tabular} & 1                        \\ \hline
+\end{longtable}
+
+\begin{center}
+表 4.3：锁管理类别及其特性
+\end{center}
+
+让我们看看每个互斥管理类及其主要功能。
 
 \mySubsubsection{4.4.1.}{std::lock\_guard}
 
+std::lock\_guard 类是一个资源获取即初始化 (RAII) 类，它使使用互斥锁更加容易，并保证在调用 lock\_guard 析构函数时释放互斥锁。这在处理异常等情况下非常有用。
+
+以下代码显示了 std::lock\_guard 的用法以及当已获取锁时它如何更容易地处理异常：
+
+\begin{cpp}
+#include <format>
+#include <iostream>
+#include <mutex>
+#include <thread>
+
+std::mutex mtx;
+uint32_t counter{};
+
+void function_throws() { throw std::runtime_error("Error"); }
+
+int main() {
+    auto worker = [] {
+        for (int i = 0; i < 1000000; ++i) {
+            mtx.lock();
+            counter++;
+            mtx.unlock();
+        }
+    };
+
+    auto worker_exceptions = [] {
+        for (int i = 0; i < 1000000; ++i) {
+            try {
+                std::lock_guard<std::mutex> lock(mtx);
+                counter++;
+                function_throws();
+            } catch (std::system_error& e) {
+                std::cout << e.what() << std::endl;
+                return;
+            } catch (...) {
+                return;
+            }
+        }
+    };
+
+    std::thread t1(worker_exceptions);
+    std::thread t2(worker);
+
+    t1.join();
+    t2.join();
+
+    std::cout << "Final counter value: " << counter << std::endl;
+}
+\end{cpp}
+
+function\_throws() 函数只是一个会引发异常的实用函数。
+
+在前面的代码示例中， worker\_exceptions() 函数由 t1 执行。在这种情况下，处理异常以打印有意义的消息。未显式获取/释放锁。这委托给 lock，一个 std::lock\_guard 对象。构造锁时，它会包装互斥锁并调用 mtx.lock()，获取锁。当锁被销毁时，互斥锁会自动释放。如果发生异常，互斥锁也将被释放，因为已退出定义锁的范围。
+
+为 std::lock\_guard 实现了另一个构造函数，接收 std::adopt\_lock\_t 类型的参数。基本上，这个构造函数可以包装已经获取的非共享互斥锁，它将在 std::lock\_guard 析构函数中自动释放。
+
 \mySubsubsection{4.4.2.}{std::unique\_lock}
+
+std::lock\_guard 类只是一个简单的 std::mutex 包装器，它自动在其构造函数中获取互斥锁（ 线程将被阻止，等待另一个线程释放互斥锁）并在其析构函数中释放互斥锁。这非常有用，但有时我们需要更多控制。例如， std::lock\_guard 将在互斥锁上调用 lock() 或假定互斥锁已被获取。我们可能更喜欢或确实需要调用 try\_lock。我们可能还希望 std::mutex 包装器不要在其构造函数中获取锁；也就是说，我们可能希望将锁定推迟到稍后。所有这些功能均由 std::unique\_lock 实现。
+
+std::unique\_lock 构造函数接受一个标签作为其第二个参数，以指示我们要对底层互斥锁执行的操作。有三个选项
+
+\begin{itemize}
+\item
+std::defer\_lock：不获取互斥锁的所有权。互斥锁在构造函数中未被锁定，如果从未获取过，则不会在析构函数中解锁。
+
+\item
+std::adopt\_lock：假设调用线程已获取互斥锁。它将在析构函数中释放。此选项也适用于std::lock\_guard。
+
+\item
+std::try\_to\_lock：尝试在不阻塞的情况下获取互斥锁。
+\end{itemize}
+
+如果我们仅将互斥锁作为唯一参数传递给 std::unique\_lock 构造函数，其行为与 std::lock\_guard 中的行为相同：它将阻塞直到互斥锁可用，然后获取它。它将在析构函数中释放互斥锁。
+
+std::unique\_lock 类与 std::lock\_guard 不同，它允许您调用 lock() 和 unlock() 来分别获取和释放互斥锁。
 
 \mySubsubsection{4.4.3.}{std::scoped\_lock}
 
+std::scoped\_lock 类与 std::unique\_lock 一样，是实现 RAII 机制的 std::mutex 包装器（请记住- 如果获取了互斥锁，则会在析构函数中释放它们）。主要区别在于，顾名思义， std::unique\_lock 只包装一个互斥锁，而 std::scoped\_lock 包装零个或多个互斥锁。此外，互斥锁的获取顺序与传递给 std::scoped\_lock 构造函数的顺序相同，因此可以避免死锁。
+
+我们来看看下面的代码：
+
+\begin{cpp}
+std::mutex mtx1;
+std::mutex mtx2;
+
+// Acquire both mutexes avoiding deadlock
+std::scoped_lock lock(mtx1, mtx2);
+
+// Same as doing this
+// std::lock(mtx1, mtx2);
+// std::lock_guard<std::mutex> lock1(mtx1, std::adopt_lock);
+// std::lock_guard<std::mutex> lock2(mtx2, std::adopt_lock);
+\end{cpp}
+
+前面的代码片段展示了如何轻松地使用两个互斥锁。
+
 \mySubsubsection{4.4.4.}{std::shared\_lock}
+
+std::shared\_lock 类是另一个通用互斥锁所有权包装器。与 std::unique\_lock 和 std::scoped\_lock 一样，它允许延迟锁定和转移锁所有权。 std::unique\_lock 和 std::shared\_lock 之间的主要区别在于，后者用于在共享模式下获取/释放包装的互斥锁，而前者用于在独占模式下执行相同操作。
+
+在本节中，我们了解了互斥包装类及其主要功能。接下来，我们将介绍另一种同步机制： 条件变量。
+
+
+
+
+
+
+
+
+
+
+
+
+

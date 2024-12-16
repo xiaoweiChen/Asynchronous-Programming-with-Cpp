@@ -1,12 +1,588 @@
+现在是时候使用 std::async 实现一些示例来处理实际场景了。我们将学习如何执行以下操作：
 
-\mySubsubsection{7.8.1.}{Parallel computation and aggregation}
+\begin{itemize}
+\item
+执行并行计算和聚合
 
-\mySubsubsection{7.8.2.}{Asynchronous searches}
+\item
+跨不同容器或大型数据集异步搜索
 
-\mySubsubsection{7.8.3.}{Asynchronous matrix multiplication}
+\item
+异步乘以两个矩阵
 
-\mySubsubsection{7.8.4.}{Chain asynchronous operations}
+\item
+链式异步操作
 
-\mySubsubsection{7.8.5.}{Asynchronous pipeline}
+\item
+改进上一章的管道示例
+\end{itemize}
 
+\mySubsubsection{7.8.1.}{并行计算和聚合}
 
+数据聚合是从多个来源收集原始数据并组织、处理和提供数据摘要以方便使用的过程。此过程在许多领域都很有用，例如业务报告、金融服务、医疗保健、社交媒体监控、研究和学术界。
+
+举一个简单的例子，让我们计算 1 到 n 之间的所有数字的平方并得出它们的平均值。我们知道使用以下公式可以计算平方值的总和会更快，并且需要更少的计算机能力。此外，任务可能更有意义，但本示例的目的是了解任务之间的关系，而不是任务本身。
+
+\begin{center}
+$\sum_{i=1}^{n}{i^2} = \frac{n(n+1)\frac{n(n+1)(2n+1)}{6}(2n+1)}{6}$
+\end{center}
+
+以下示例中的 average\_squares() 函数针对 1 到 n 之间的每个值启动一个异步任务来计算平方值。生成的 Future 对象存储在 futsVec 向量中，稍后 sum\_results() 函数会使用该向量计算平方值的总和。然后将结果除以 n 以获得平均值：
+
+\begin{cpp}
+#include <future>
+#include <iomanip>
+#include <iostream>
+#include <vector>
+
+int square(int x) {
+    return x * x;
+}
+
+int sum_results(std::vector<std::future<int>>& futsVec) {
+    int sum = 0;
+    for (auto& fut : futsVec) {
+        sum += fut.get();
+    }
+    return sum;
+}
+
+int average_squares(int n) {
+    std::vector<std::future<int>> futsVec;
+    for (int i = 1; i <= n; ++i) {
+        futsVec.push_back(std::async(
+        std::launch::async, square, i));
+    }
+    return double(sum_results(futures)) / n;
+}
+
+int main() {
+    int N = 100;
+    std::cout << std::fixed << std::setprecision(2);
+    std::cout << "Sum of squares for N = " << N
+              << " is " << average_squares(N) << '\n';
+    return 0;
+}
+\end{cpp}
+
+例如，对于 n = 100 ，我们可以检查该值是否与函数除以 n 返回的值相同，即 3,383.50。
+
+可以轻松修改此示例，以使用 MapReduce 编程模型实现解决方案，从而高效处理大型数据集。 MapReduce 的工作原理是将数据处理分为两个阶段： Map 阶段，在此阶段，独立的数据块在多台计算机上并行过滤、排序和处理； Reduce 阶段，在此阶段，汇总 Map 阶段的结果，汇总数据。这就像我们刚刚实现的一样，在 Map 阶段使用 square() 函数，在 Reduce 阶段使用 average\_squares() 和 sum\_results() 函数。
+
+\mySubsubsection{7.8.2.}{异步搜索}
+
+加快在大型容器中搜索目标值的一种方法是并行化搜索。接下来，我们将介绍两个示例。
+第一个示例涉及跨不同容器进行搜索，每个容器使用一个任务；第二个示例涉及跨大型容器进行搜索，将其划分为较小的部分，每个部分使用一个任务。
+
+\mySamllsubsection{跨不同容器搜索}
+
+在这个例子中，我们需要在包含动物名称的不同类型的容器（向量、列表、 forward\_list 和集合）中搜索目标值：
+
+\begin{cpp}
+#include <algorithm>
+#include <forward_list>
+#include <future>
+#include <iostream>
+#include <list>
+#include <set>
+#include <string>
+#include <vector>
+
+int main() {
+    std::vector<std::string> africanAnimals =
+                {"elephant", "giraffe", "lion", "zebra"};
+    std::list<std::string> americanAnimals =
+                {"alligator", "bear", "eagle", "puma"};
+    std::forward_list<std::string> asianAnimals =
+                {"orangutan", "panda", "tapir", "tiger"};
+    std::set<std::string> europeanAnimals =
+                {"deer", "hedgehog", "linx", "wolf"};
+
+    std::string target = "elephant";
+    /* .... */
+}
+\end{cpp}
+
+为了搜索目标值，我们使用 search() 模板函数为每个容器启动一个异步任务，该函数只是调用容器中的 std::find 函数，如果找到目标值则返回 true，否则返回 false：
+
+\begin{cpp}
+template <typename C>
+bool search(const C& container, const std::string& target) {
+    return std::find(container.begin(), container.end(),
+                     target) != container.end();
+}
+\end{cpp}
+
+这些异步任务是使用带有 std::launch::async 启动策略的 std::async 函数启动的：
+
+\begin{cpp}
+int main() {
+    /* .... */
+    auto fut1 = std::async(std::launch::async,
+                search<std::vector<std::string>>,
+                africanAnimals, target);
+    auto fut2 = std::async(std::launch::async,
+                search<std::list<std::string>>,
+                americanAnimals, target);
+    auto fut3 = std::async(std::launch::async,
+                search<std::forward_list<std::string>>,
+                asianAnimals, target);
+    auto fut4 = std::async(std::launch::async,
+                search<std::set<std::string>>,
+                europeanAnimals, target);
+    /* .... */
+\end{cpp}
+
+最后，我们只需从使用 std::async 创建的未来中检索所有返回值并对其进行按位或处理：
+
+\begin{cpp}
+int main() {
+    /* .... */
+    bool found = fut1.get() || fut2.get() ||
+    fut3.get() || fut4.get();
+    if (found) {
+        std::cout << target
+                  << " found in one of the containers.\n";
+    } else {
+        std::cout << target
+                  << " not found in any of "
+                  << "the containers.\n";
+    }
+
+    return 0;
+}
+\end{cpp}
+
+这个例子还展示了标准模板库（STL）的强大功能，因为它提供了可应用于不同容器和数据类型的通用和可重用的算法。
+
+\mySamllsubsection{在大型容器中搜索}
+
+在下一个例子中，我们将实现一个解决方案，在包含 500 万个整数值的大向量中找到目标值。
+
+为了生成向量，我们使用具有均匀整数分布的随机数生成器：
+
+\begin{cpp}
+#include <cmath>
+#include <iostream>
+#include <vector>
+#include <future>
+#include <algorithm>
+#include <random>
+
+// Generate a large vector of random integers using a uniform
+distribution
+std::vector<int> generate_vector(size_t size) {
+    std::vector<int> vec(size);
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    std::uniform_int_distribution<> dist(1, size);
+    std::generate(vec.begin(), vec.end(), [&]() {
+        return dist(gen);
+    });
+    return vec;
+}
+\end{cpp}
+
+为了在向量的某个段中搜索目标值，我们可以使用 std::find 函数，其中 begin 和 end 迭代器指向段限制：
+
+\begin{cpp}
+bool search_segment(const std::vector<int>& vec, int target, size_t
+begin, size_t end) {
+    auto begin_it = vec.begin() + begin;
+    auto end_it = vec.begin() + end;
+    return std::find(begin_it, end_it, target) != end_it;
+}
+\end{cpp}
+
+在 main() 函数中，我们首先使用 generate\_vector() 函数生成大向量，然后定义要查找的目标值以及向量将拆分为并行搜索的段数 (num\_segments)：
+
+\begin{cpp}
+const int target = 100;
+
+std::vector<int> vec = generate_vector(5000000);
+auto vec_size = vec.size();
+
+size_t num_segments = 16;
+size_t segment_size = vec.size() / num_segments;
+\end{cpp}
+
+然后，对于每个段，我们定义其开始和结束迭代器，并启动一个异步任务来搜索该段中的目标值。因此，我们使用 std::async 和 std::launch::async 启动策略在单独的线程中异步执行 search\_segment。为了避免在将其作为 search\_segment 的输入参数传递时复制大型向量，我们使用常量引用 std::cref。std::async 返回的 Future 存储在 futs 向量中：
+
+\begin{cpp}
+std::vector<std::future<bool>> futs;
+for (size_t i = 0; i < num_segments; ++i) {
+    auto begin = std::min(i * segment_size, vec_size);
+    auto end = std::min((i + 1) * segment_size, vec_size);
+    futs.push_back( std::async(std::launch::async,
+                               search_segment,
+                               std::cref(vec),
+                               target, begin, end) );
+}
+\end{cpp}
+
+请注意，向量大小并不总是段大小的倍数，因此最后一个段可能比其他段短。为了处理这种情况并避免在检查最后一个段时访问越界内存时出现问题，我们需要正确设置每个段的开始和结束索引。为此，我们使用 std::min 来获取向量大小与当前段中最后一个元素的假设索引之间的最小值。
+
+最后，我们通过在每个未来上调用 get() 来检查所有结果，如果在任何段中找到目标值，则将消息打印到控制台：
+
+\begin{cpp}
+bool found = false;
+for (auto& fut : futs) {
+    if (fut.get()) {
+        found = true;
+        break;
+    }
+}
+
+if (found) {
+    std::cout << "Target " << target
+              << " found in the large vector.\n";
+} else {
+    std::cout << "Target " << target
+              << " not found in the large vector.\n";
+}
+\end{cpp}
+
+该解决方案可作为处理分布式系统中的海量数据集的更高级解决方案的基础，其中每个异步任务都尝试在特定机器或集群中找到目标值。
+
+\mySubsubsection{7.8.3.}{异步矩阵乘法}
+
+矩阵乘法是计算机科学中最相关的运算之一，用于计算机图形学、计算机视觉、机器学习和科学计算等许多领域。
+
+在下面的示例中，我们将通过将计算分布在多个线程中来实现并行计算解决方案。
+
+让我们首先定义一个矩阵类型， matrix\_t，作为保存整数值的向量的向量：
+
+\begin{cpp}
+#include <cmath>
+#include <exception>
+#include <future>
+#include <iostream>
+#include <vector>
+
+using matrix_t = std::vector<std::vector<int>>;
+\end{cpp}
+
+然后，我们实现 matrix\_multiply 函数，该函数接受两个矩阵 A 和 B，将它们作为常量引用传递，并返回它们的乘积。我们知道，如果 A 是一个 mxn 矩阵（m 代表行， n 代表列），B 是一个 pxq 矩阵，如果 n = p，我们可以将 A 和 B 相乘，得到的矩阵尺寸为 mxq（m 行和q 列）。
+
+matrix\_multiply 函数首先为结果矩阵 res 保留一些空间。然后，它循环遍历矩阵，从 B 中提取第 j 列并将其乘以 A 中的第 i 行：
+
+\begin{cpp}
+matrix_t matrix_multiply(const matrix_t& A,
+                         const matrix_t& B) {
+    if (A[0].size() != B.size()) {
+        throw new std::runtime_error(
+                  "Wrong matrices dimmensions.");
+    }
+    size_t rows = A.size();
+    size_t cols = B[0].size();
+    size_t inner_dim = B.size();
+    matrix_t res(rows, std::vector<int>(cols, 0));
+    std::vector<std::future<int>> futs;
+    for (auto i = 0; i < rows; ++i) {
+        for (auto j = 0; j < cols; ++j) {
+            std::vector<int> column(inner_dim);
+            for (size_t k = 0; k < inner_dim; ++k) {
+                column[k] = B[k][j];
+            }
+            futs.push_back(std::async(std::launch::async,
+                                      dot_product,
+                                      A[i], column));
+        }
+    }
+    for (auto i = 0; i < rows; ++i) {
+        for (auto j = 0; j < cols; ++j) {
+            res[i][j] = futs[i * cols + j].get();
+        }
+    }
+    return res;
+}
+\end{cpp}
+
+通过使用 std::async 和 std::launch::async 启动策略，运行 dot\_product 函数，异步完成乘法。std::async 返回的每个 Future 都存储在 futs 向量中。 dot\_product 函数计算向量 a 和 b 的点积，表示来自 A 的一行和来自 B 的一列，方法是将元素逐个相乘并返回这些乘积的总和：
+
+\begin{cpp}
+int dot_product(const std::vector<int>& a,
+                const std::vector<int>& b) {
+    int sum = 0;
+    for (size_t i = 0; i < a.size(); ++i) {
+        sum += a[i] * b[i];
+    }
+    return sum;
+}
+\end{cpp}
+
+由于 dot\_product 函数需要两个向量，因此我们需要在启动每个异步任务之前从 B 中提取每一列。这还可以提高整体性能，因为向量可能存储在连续的内存块中，从而在计算过程中更有利于缓存。
+
+在 main() 函数中，我们仅定义两个矩阵 A 和 B，并使用 matrix\_multipy 函数计算它们的乘积。所有矩阵都使用 show\_matrix lambda 函数打印到控制台中：
+
+\begin{cpp}
+int main() {
+    auto show_matrix = [](const std::string& name,
+                          matrix_t& mtx) {
+        std::cout << name << '\n';
+        for (const auto& row : mtx) {
+            for (const auto& elem : row) {
+                std::cout << elem << " ";
+            }
+            std::cout << '\n';
+        }
+        std::cout << std::endl;
+    };
+    matrix_t A = {{1, 2, 3},
+                  {4, 5, 6}};
+
+    matrix_t B = {{7, 8, 9},
+                  {10, 11, 12},
+                  {13, 14, 15}};
+
+    auto res = matrix_multiply(A, B);
+
+    show_matrix("A", A);
+    show_matrix("B", B);
+    show_matrix("Result", res);
+
+    return 0;
+}
+\end{cpp}
+
+这是运行此示例的输出：
+
+\begin{cpp}
+A
+1 2 3
+4 5 6
+
+B
+7 8 9
+10 11 12
+13 14 15
+
+Result
+66 72 78
+156 171 186
+\end{cpp}
+
+使用连续的内存块可以提高遍历向量时的性能，因为可以一次将许多元素读入缓存。使用 st d::vector 时不能保证使用连续的内存分配，因此最好使用 new 或 malloc。
+
+\mySubsubsection{7.8.4.}{链式异步操作}
+
+在这个例子中，我们将实现一个由三个阶段组成的简单管道，每个阶段都获取前一个阶段的结果并计算一个值。
+
+\myGraphic{1.0}{content/part3/chapter7/images/1.png}{图 7.1 – 简单管道示例}
+
+第一阶段仅接受正整数作为输入，否则会引发异常，并在返回结果之前将该值加 10。第二阶段将其输入乘以 2，第三阶段从其输入中减去 5：
+
+\begin{cpp}
+#include <future>
+#include <iostream>
+#include <stdexcept>
+
+int stage1(int x) {
+    if (x < 0) throw std::runtime_error(
+    "Negative input not allowed");
+    return x + 10;
+}
+
+int stage2(int x) {
+    return x * 2;
+}
+
+int stage3(int x) {
+    return x - 5;
+}
+\end{cpp}
+
+在 main() 函数中，对于中间阶段和最终阶段，我们通过使用前几个阶段生成的 Future 作为输入来定义管道。这些 Future 通过引用传递给运行异步代码的 lambda 表达式，其中使用它们的 get() 函数来获取其结果。
+
+要从管道中检索结果，我们只需从上一个阶段返回的 Future 中调用 get() 函数即可。如果发生异常，例如，当 input\_value 为负数时，它将被 try-catch 块捕获：
+
+\begin{cpp}
+int main() {
+    int input_value = 5;
+    try {
+        auto fut1 = std::async(std::launch::async,
+                          stage1, input_value);
+
+        auto fut2 = std::async(std::launch::async,
+                            [&fut1]() {
+                                return stage2(fut1.get()); });
+
+        auto fut3 = std::async(std::launch::async,
+                            [&fut2]() {
+                                return stage3(fut2.get()); });
+
+        int final_result = fut3.get();
+        std::cout << "Final Result: "
+                  << final_result << std::endl;
+
+    } catch (const std::exception &ex) {
+        std::cerr << "Exception caught: "
+                  << ex.what() << std::endl;
+    }
+    return 0;
+}
+\end{cpp}
+
+本例中定义的管道很简单，每个阶段都使用前一个阶段的 Future 来获取输入值并产生结果。在下一个示例中，我们将使用 std:async 和延迟启动策略重写上一章中实现的管道，以便仅执行所需的阶段。
+
+\mySubsubsection{7.8.5.}{异步管道}
+
+正如上一章中承诺的那样，当我们实现管道时，我们提到可以使用具有延迟执行的 Future 将不同的任务保持关闭状态，直到需要时才执行。正如所提到的，这在计算成本很高但结果可能并不总是需要的情况下很有用。由于只能使用 std::async 创建具有延迟状态的 Future ，现在是时候看看如何做到这一点了。
+
+我们将实现上一章中描述的相同管道，它遵循下一个任务图：
+
+\myGraphic{1.0}{content/part3/chapter7/images/2.png}{图 7.2 – 管道示例}
+
+我们首先定义 Task 类。该类类似于上一章示例中实现的类，但使用 std::async 函数并存储返回的 Future，而不是之前使用的 Promise。在这里，我们只会评论该示例中的相关代码更改，因此请查看该示例以了解 Task 类的完整说明，或在 GitHub 存储库中查看它。
+
+任务构造函数存储任务标识符 (id\_)、要启动的函数 (func\_) 以及任务是否具有依赖项 (has\_d ependency\_)。它还使用 std::async 和 std::launch::deferred 启动策略以延迟启动模式启动异步任务，这意味着任务已创建但直到需要时才启动。返回的未来存储在 fut\_ 变量中：
+
+\begin{cpp}
+template <typename Func>
+class Task {
+    public:
+    Task(int id, Func& func)
+        : id_(id), func_(func), has_dependency_(false) {
+        sync_cout << "Task " << id
+                  << " constructed without dependencies.\n";
+        fut_ = std::async(std::launch::deferred,
+        [this](){ (*this)(); });
+    }
+    template <typename... Futures>
+    Task(int id, Func& func, Futures&&... futures)
+        : id_(id), func_(func), has_dependency_(true) {
+        sync_cout << "Task " << id
+                  << " constructed with dependencies.\n";
+        fut_ = std::async(std::launch::deferred,
+                          [this](){ (*this)(); });
+        add_dependencies(std::forward<Futures>
+                                     (futures)...);
+    }
+
+private:
+    int id_;
+    Func& func_;
+    std::future<void> fut_;
+    std::vector<std::shared_future<void>> deps_;
+    bool has_dependency_;
+};
+\end{cpp}
+
+由 std::async 启动的异步任务会调用它们自己的实例（this 对象）的 operator()。当发生这种情况时，将调用 wait\_completion()，通过调用它们的 valid() 函数检查共享未来向量 deps\_ 中存储依赖任务的所有未来是否有效，如果是，则通过调用 get() 函数等待它们完成。当所有依赖任务都完成后，将调用 func\_ 函数：
+
+\begin{cpp}
+public:
+void operator()() {
+    sync_cout << "Starting task " << id_ << std::endl;
+
+    wait_completion();
+
+    sync_cout << "Running task " << id_ << std::endl;
+    func_();
+}
+private:
+void wait_completion() {
+    sync_cout << "Waiting completion for task "
+              << id_ << std::endl;
+    if (!deps_.empty()) {
+        for (auto& fut : deps_) {
+            if (fut.valid()) {
+                sync_cout << "Fut valid so getting "
+                          << "value in task " << id_
+                          << std::endl;
+                fut.get();
+            }
+        }
+    }
+}
+\end{cpp}
+
+还有一个新的成员函数start（），它在调用std::async时等待在任务构造期间创建的fut\_future 。这将用于通过请求最后一个任务的结果来触发管道：
+
+\begin{cpp}
+public:
+void start() {
+    fut_.get();
+}
+\end{cpp}
+
+与上一章中的示例一样，我们还定义了一个名为 get\_dependency() 的成员函数，它返回由 fut\_ 构造的共享未来：
+
+\begin{cpp}
+std::shared_future<void> get_dependency() {
+    sync_cout << "Getting future from task "
+              << id_ << std::endl;
+    return fut_;
+}
+\end{cpp}
+
+在 main() 函数中，我们通过链接任务对象并设置它们的依赖关系以及要运行的 lambda 函数sleep1s 或 sleep2s 来定义管道，按照图 7.2 所示的图表进行操作：
+
+\begin{cpp}
+int main() {
+    auto sleep1s = [](){
+        std::this_thread::sleep_for(1s);
+    };
+    auto sleep2s = [](){
+        std::this_thread::sleep_for(2s);
+    };
+    Task task1(1, sleep1s);
+    Task task2(2, sleep2s, task1.get_dependency());
+    Task task3(3, sleep1s, task2.get_dependency());
+    Task task4(4, sleep2s, task2.get_dependency());
+    Task task5(5, sleep2s, task3.get_dependency(),
+               task4.get_dependency());
+
+    sync_cout << "Starting the pipeline..." << std::endl;
+    task5.start();
+
+    sync_cout << "All done!" << std::endl;
+    return 0;
+}
+\end{cpp}
+
+启动管道非常简单，只需从上一个任务的未来获取结果即可。我们可以通过调用 task5 的 start() 方法来做到这一点。这将使用依赖向量递归调用它们的依赖任务并启动延迟的异步任务。
+
+这是执行上述代码的输出：
+
+\begin{shell}
+Task 1 constructed without dependencies.
+Getting future from task 1
+Task 2 constructed with dependencies.
+Getting future from task 2
+Task 3 constructed with dependencies.
+Getting future from task 2
+Task 4 constructed with dependencies.
+Getting future from task 4
+Getting future from task 3
+Task 5 constructed with dependencies.
+Starting the pipeline...
+Starting task 5
+Waiting completion for task 5
+Fut valid so getting value in task 5
+Starting task 3
+Waiting completion for task 3
+Fut valid so getting value in task 3
+Starting task 2
+Waiting completion for task 2
+Fut valid so getting value in task 2
+Starting task 1
+Waiting completion for task 1
+Running task 1
+Running task 2
+Running task 3
+Fut valid so getting value in task 5
+Starting task 4
+Waiting completion for task 4
+Running task 4
+Running task 5
+All done!
+\end{shell}
+
+我们可以通过调用每个任务的构造函数并从先前的依赖任务中获取未来来看到如何创建管道。
+
+然后，当触发管道时，将启动任务 5，并递归启动任务 3、任务 2 和任务 1。由于任务 1 没有依赖项，因此它不需要等待任何其他任务运行其工作，因此它已完成，从而允许任务 2 完成，然后是任务 3。
+
+接下来， task5 继续检查其依赖任务，因此现在轮到 task4 运行了。由于 task4 的所有依赖任务都已完成，因此 task4 只需执行，然后 task5 即可运行，从而完成管道。
+
+可以通过执行实际计算并在任务之间传输结果来改进此示例。此外，除了延迟任务，我们还可以考虑具有多个并行步骤的阶段，这些步骤可以在单独的线程中计算。请随意将这些改进作为附加练习来实现。

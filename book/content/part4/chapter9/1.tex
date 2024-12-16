@@ -1,0 +1,30 @@
+对于本章，我们需要安装 Boost C++ 库。撰写本书时最新版本是 Boost 1.85.0。以下是发行说明：
+
+\url{https://www.boost.org/users/history/version_1_85_0.html}
+
+有关 Unix 变体系统（Linux、 macOS）中的安装说明，请查看以下链接：
+
+\url{https://www.boost.org/doc/libs/1_85_0/more/getting_started/unix-variants.html}
+
+对于 Windows 系统，请查看此链接：
+
+\url{https://www.boost.org/doc/libs/1_85_0/more/getting_started/windows.html}
+
+此外，根据我们要开发的项目，我们可能需要配置 Boost.Asio 或安装依赖项：
+
+\url{https://www.boost.org/doc/libs/1_85_0/doc/html/boost_asio/using.html}
+
+本章中显示的所有代码均受 C++20 版本的支持。请查看第 3 章中的技术要求部分，其中提供了有关如何安装 GCC 13 和 Clang 8 编译器的一些指导。
+
+您可以在以下 GitHub 存储库中找到完整的代码：
+
+\url{https://github.com/PacktPublishing/Asynchronous-Programming-with-CPP}
+
+本章的示例位于 Chapter\_09 文件夹下。所有源代码文件都可以使用 CMake 进行编译，如下所示：
+
+\begin{shell}
+cmake . && cmake —build .
+\end{shell}
+
+可执行二进制文件将在 bin 目录下生成。
+

@@ -1,0 +1,165 @@
+在第 5 章中，我们实现了一个 SPSC 无锁队列，作为如何在不使用锁的情况下同步两个线程对数据结构的访问的示例。此队列仅由两个线程访问：一个生产者将数据推送到队列，一个消费者从队列中弹出数据。这是最容易同步的队列。
+
+我们使用两个原子变量来表示队列的头（要读取的缓冲区索引）和尾（要写入的缓冲区索引）：
+
+\begin{cpp}
+std::atomic<std::size_t> head_ { 0 };
+std::atomic<std::size_t> tail_ { 0 };
+\end{cpp}
+
+为了避免伪共享，我们可以将代码改成如下形式：
+
+\begin{cpp}
+alignas(64) std::atomic<std::size_t> head_ { 0 };
+alignas(64) std::atomic<std::size_t> tail_ { 0 };
+\end{cpp}
+
+完成此更改后，我们可以运行我们实现的代码来测量生产者和消费者线程每秒执行的操作数（推送/弹出）。代码可以在本书的 GitHub 存储库中找到。
+
+现在，我们可以运行 perf：
+
+\begin{shell}
+perf stat -e cache-references,cache-misses ./13x09-spsc_lock_free_queue
+\end{shell}
+
+我们将得到以下结果：
+
+\begin{shell}
+101559149 ops/sec
+
+    Performance counter stats for ‹./13x09-spsp_lock_free_queue›:
+
+        532,295,487      cache-references
+        219,861,054      cache-misses # 41.30% of all cache refs
+
+        9.848523651 seconds time elapsed
+\end{shell}
+
+这里我们可以看到队列每秒能够执行大约 1 亿次操作。此外，缓存未命中率约为 41\%。
+
+让我们回顾一下队列的工作原理。在这里，生产者是唯一写入 tail\_ 的线程，而消费者是唯一写入 head\_ 的线程。不过，两个线程都需要读取 tail\_ 和 head\_。我们将两个原子变量声明为 aligned(64)，这样就可以保证它们位于不同的缓存行中，并且不存在错误共享。但是，存在真正的共享。真正的共享也会产生缓存一致性流量。
+
+真正的共享意味着两个线程都可以共享访问两个变量，即使每个变量仅由一个线程（且始终是同一个线程）写入。在这种情况下，为了提高性能，我们必须减少共享，尽可能避免每个线程对两个变量进行读取访问。我们无法避免数据共享，但可以减少它。
+
+让我们关注生产者（与消费者的机制相同）：
+
+\begin{cpp}
+bool push(const T &item) {
+    std::size_t tail = tail_.load(std::memory_order_relaxed);
+    std::size_t next_tail = (tail + 1) & (capacity_ - 1);
+    if (next_tail == cache_head_) {
+        cache_head_ = head_.load(std::memory_order_acquire);
+        if (next_tail == cache_head_) {
+            return false;
+        }
+    }
+    buffer_[tail] = item;
+    tail_.store(next_tail, std::memory_order_release);
+    return true;
+}
+\end{cpp}
+
+push() 函数仅由生产者调用。
+
+让我们分析一下该函数的作用：
+
+\begin{itemize}
+\item
+它原子地读取环形缓冲区中存储项目的最后一个索引：
+
+\begin{cpp}
+std::size_t tail = tail_.load(std::memory_order_relaxed);
+\end{cpp}
+
+\item
+它计算该项目在环形缓冲区中存储的索引：
+
+\begin{cpp}
+std::size_t next_tail = (tail + 1) & (capacity_ - 1);
+\end{cpp}
+
+\item
+检查环形缓冲区是否已满。但是，它没有读取 head\_，而是读取缓存的 head 值：
+
+\begin{cpp}
+    if (next_tail == cache_head_) {
+\end{cpp}
+
+最初， cache\_head\_ 和 cache\_tail\_ 都设置为零。如前所述，使用这两个变量的目的是尽量减少核心之间的缓存更新。缓存变量技术的工作原理如下：每次调用 push（或 pop）时，我们都会以原子方式读取 tail\_（由同一线程写入，因此不需要缓存更新）并生成下一个索引，我们将在其中存储作为参数传递给 push 函数的项目。现在，我们不再使用 head\_ 来检查队列是否已满，而是使用 cache\_head\_，它仅由一个线程（生产者线程）访问，从而避免任何缓存一致性流量。如果队列已“满”，则我们通过以原子方式加载 head\_ 来更新 cache\_head\_。在此更新之后，我们再次检查。如果第二次检查导致队列已满，则我们返回 false。
+
+使用这些局部变量（生产者使用 cache\_head\_，消费者使用 cache\_tail\_）的优点是它们减少了真正的共享，即访问可能在不同核心的缓存中更新的变量。当生产者推送多个在消费者尝试获取队列中的项目之前（对于消费者来说也是一样）。假设生产者在队列中插入 10 个项目，而消费者尝试获取一个项目。在这种情况下，第一次使用缓存变量检查会告诉我们队列为空，但在使用实际值更新后，一切正常。消费者只需读取cache\_tail\_ 变量检查队列是否为空，即可获取另外 9 个项目。
+
+\item
+如果环形缓冲区已满，则更新 cache\_head\_：
+
+\begin{cpp}
+head_.load(std::memory_order_acquire);
+        if (next_tail == cache_head_) {
+            return false;
+        }
+\end{cpp}
+
+\item
+如果缓冲区已满（不仅仅是 cache\_head\_ 需要更新），则返回 false。生产者无法将新项目推送到队列。
+
+\item
+如果缓冲区未满，则将项目添加到环形缓冲区并返回 true：
+
+\begin{cpp}
+buffer_[tail] = item;
+    tail_.store(next_tail, std::memory_order_release);
+    return true;
+\end{cpp}
+\end{itemize}
+
+我们可能减少了生产者线程访问 tail\_ 的次数，从而减少了缓存一致性流量。考虑这种情况：生产者和消费者使用队列，生产者调用 push()。当 push() 更新 cache\_head\_ 时，它可能比tail\_ 领先一个以上位置，这意味着我们不需要读取 tail\_。
+
+同样的原则也适用于消费者和pop()。
+
+修改代码以减少缓存一致性流量后，我们再次运行 perf：
+
+\begin{shell}
+162493489 ops/sec
+
+  Performance counter stats for ‹./13x09-spsp_lock_free_queue›:
+
+        474,296,947     cache-references
+        148,898,301     cache-misses           # 31.39% of all cache refs
+
+        6.156437788 seconds time elapsed
+
+       12.309295000 seconds user
+        0.000999000 seconds sys
+\end{shell}
+
+这里，我们可以看到性能提高了约 60\%，并且缓存引用和缓存未命中的数量减少了。
+
+通过此，我们了解了如何减少两个线程之间对共享数据的访问可以提高性能。
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

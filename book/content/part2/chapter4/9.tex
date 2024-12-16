@@ -1,0 +1,97 @@
+有时，我们只需要执行一次某项任务。例如，在多线程应用程序中，多个线程可能会运行相同的函数来初始化变量。任何正在运行的线程都可以执行此操作，但我们希望初始化只执行一次。
+
+C++ 标准库提供了 std::once\_flag 和 std::call\_once 来实现该功能。我们将在下一章中了解如何使用原子操作实现此功能。
+
+下面的例子将帮助我们理解如何使用 std::once\_flag 和 std::call\_once 来实现当多个线程尝试执行某项任务时只执行一次的目标：
+
+\begin{cpp}
+#include <exception>
+#include <iostream>
+#include <mutex>
+#include <thread>
+
+int main() {
+    std::once_flag run_once_flag;
+    std::once_flag run_once_exceptions_flag;
+
+    auto thread_function = [&] {
+        std::call_once(run_once_flag, []{
+            std::cout << "This must run just once\n";
+        });
+    };
+
+    std::jthread t1(thread_function);
+    std::jthread t2(thread_function);
+    std::jthread t3(thread_function);
+
+    auto function_throws = [&](bool throw_exception) {
+        if (throw_exception) {
+            std::cout << "Throwing exception\n";
+            throw std::runtime_error("runtime error");
+        }
+        std::cout << "No exception was thrown\n";
+    };
+
+    auto thread_function_1 = [&](bool throw_exception) {
+        try {
+            std::call_once(run_once_exceptions_flag,
+            function_throws,
+            throw_exception);
+        }
+        catch (...) {
+        }
+    };
+
+    std::jthread t4(thread_function_1, true);
+    std::jthread t5(thread_function_1, true);
+    std::jthread t6(thread_function_1, false);
+
+    return 0;
+}
+\end{cpp}
+
+在示例的第一部分中，三个线程 t1、 t2 和 t3 运行 thread\_function 函数。此函数从 std::call\_once 调用 lambda。如果运行示例，您将看到消息 "This must run just once" 仅打印一次，正如预期的那样。
+
+在示例的第二部分中，同样，三个线程 t4、 t5 和 t6 运行 thread\_function\_1 函数。此函数调用 function\_throws，根据参数的不同，可能会抛出或不抛出异常。此代码表明，如果从 std:: call\_once 调用的函数未成功终止，则不算完成，应再次调用 std::call\_once。只有成功的函数才算运行函数。
+
+最后一节展示了一个简单的机制，我们可以使用它来确保一个函数只执行一次，即使它从同一个或不同的线程被调用多次。
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

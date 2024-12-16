@@ -1,3 +1,174 @@
 
 
-\mySubsubsection{8.5.1.}{Fibonacci sequence generator}
+生成器是一个协同程序，它通过从暂停点反复恢复自身来生成一系列元素。
+
+生成器可以看作是一个无限序列，因为它可以生成任意数量的元素。调用函数可以根据需要从生成器中获取任意数量的新元素。
+
+当我们说无限时，我们指的是理论上。生成器协同程序将产生没有明确最后一个元素的元素（可以实现具有有限范围的生成器），但在实践中，我们必须处理诸如数字序列溢出之类的问题。
+
+让我们从头开始实现一个生成器，应用我们在本章前面章节中获得的知识。
+
+\mySubsubsection{8.5.1.}{斐波那契数列生成器}
+
+假设我们正在实现一个应用程序，我们需要使用斐波那契数列。您可能已经知道，斐波那契数列是一个序列，其中每个数字都是前两个数字的总和。第一个元素是 0，第二个元素是1，然后我们应用定义并生成一个又一个元素。
+
+斐波那契数列： $F (n) = F (n − 2) + F (n − 1) ; F (0) = 0, F (1) = 1$
+
+我们总是可以用 for 循环生成这些数字。但如果我们需要在程序的不同点生成它们，我们需要实现一种方法来存储序列的状态。我们需要在程序的某个地方保存我们生成的最后一个元素。它是第五个还是第十个元素？
+
+协程是解决此问题的一个非常好的方法；它将自行保持所需的状态并且将暂停直到我们请求序列中的下一个数字。
+
+以下是使用生成器协程的代码：
+
+\begin{cpp}
+int main() {
+    sequence_generator<int64_t> fib = fibonacci();
+
+    std::cout << "Generate ten Fibonacci numbers\n"s;
+
+    for (int i = 0; i < 10; ++i) {
+        fib.next();
+        std::cout << fib.value() << " ";
+    }
+    std::cout << std::endl;
+
+    std::cout << "Generate ten more\n"s;
+
+    for (int i = 0; i < 10; ++i) {
+        fib.next();
+        std::cout << fib.value() << " ";
+    }
+    std::cout << std::endl;
+
+    std::cout << "Let's do five more\n"s;
+
+    for (int i = 0; i < 5; ++i) {
+        fib.next();
+        std::cout << fib.value() << " ";
+    }
+    std::cout << std::endl;
+
+    return 0;
+}
+\end{cpp}
+
+正如您在上面的代码中看到的，我们生成了所需的数字，而不必担心最后一个元素是什么。序列由协程生成。
+
+请注意，尽管理论上该序列是无限的，但我们的程序必须意识到非常大的斐波那契数的潜在溢出。
+
+为了实现生成器协程，我们遵循本章前面解释的原则。
+
+首先我们实现协程函数：
+
+\begin{cpp}
+sequence_generator<int64_t> fibonacci() {
+    int64_t a{ 0 };
+    int64_t b{ 1 };
+    int64_t c{ 0 };
+
+    while (true) {
+        co_yield a;
+        c = a + b;
+        a = b;
+        b = c;
+    }
+}
+\end{cpp}
+
+协程只是通过应用公式来生成斐波那契数列中的下一个元素。元素是在无限循环中生成的，但协程会在 co\_yield 之后自行暂停。
+
+返回类型是sequence\_generator结构（我们使用模板来使用32位或64位整数）。它包含一个承诺类型，非常类似于我们在上一节中看到的协程让步中的promise类型。
+
+在sequence\_generator结构中，我们添加了两个在实现序列生成器时很有用的函数。
+
+\begin{cpp}
+void next() {
+    if (!handle.done()) {
+        handle.resume();
+    }
+}
+\end{cpp}
+
+next()函数为将要生成的序列中的新斐波那契数恢复协程。
+
+\begin{cpp}
+int64_t value() {
+    return handle.promise().output_data;
+}
+\end{cpp}
+
+value() 函数返回最后生成的斐波那契数。
+
+这样，我们将元素生成与其检索 Qvalue 分离。
+
+请在本书附带的 GitHub 存储库中查找本示例的完整代码。
+
+\mySamllsubsection{C++23的std::generator}
+
+我们已经看到，在 C++ 中实现即使是最基本的协程也需要一定数量的代码。这种情况可能会在 C++26 中发生变化， C++ 标准库将对协程提供更多支持，这将使我们能够更轻松地编写协程。
+
+C++23 引入了 std::generator 模板类。通过使用它，我们可以编写基于协程的生成器，而无需编写任何必需的代码，例如承诺类型、返回类型及其所有函数。要运行此示例，您需要一个 C++23 编译器。我们使用了 GCC 14.1。 std::generator 在 Clang 中不可用。
+
+让我们看看使用新的 C++23 标准库功能的斐波那契数列生成器：
+
+\begin{cpp}
+#include <generator>
+#include <iostream>
+
+std::generator<int> fibonacci_generator() {
+    int a{ };
+    int b{ 1 };
+    while (true) {
+        co_yield a;
+        int c = a + b;
+        a = b;
+        b = c;
+    }
+}
+auto fib = fibonacci_generator();
+
+int main() {
+    int i = 0;
+    for (auto f = fib.begin(); f != fib.end(); ++f) {
+        if (i == 10) {
+            break;
+        }
+        std::cout << *f << " ";
+        ++i;
+    }
+    std::cout << std::endl;
+}
+\end{cpp}
+
+第一步是包含 <generator> 头文件。然后，我们只需编写协程，因为所有其余所需的代码都已为我们编写完成。在前面的代码中，我们使用迭代器（由 C++ 标准库提供）访问生成的元素。这使我们能够使用 range-for 循环、算法和范围。
+
+还可以编写斐波那契生成器的一个版本来生成一定数量的元素而不是无限数列：
+
+\begin{cpp}
+std::generator<int> fibonacci_generator(int limit) {
+    int a{ };
+    int b{ 1 };
+    while (limit--) {
+        co_yield a;
+        int c = a + b;
+        a = b;
+        b = c;
+    }
+}
+\end{cpp}
+
+代码的变化非常简单：只需传递我们希望生成器生成的元素数量，并将其用作 while 循环中的终止条件。
+
+在本节中，我们实现了最常见的协程类型之一——生成器。我们从头开始以及使用 C++23的std::generator 类模板实现了生成器。
+
+我们将在下一节中实现一个简单的字符串解析器协程。
+
+
+
+
+
+
+
+
+
+

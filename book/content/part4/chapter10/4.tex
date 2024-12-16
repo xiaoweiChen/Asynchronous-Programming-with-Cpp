@@ -1,0 +1,171 @@
+正如我们在本章中已经看到的， Boost.Cobalt 承诺是返回一个值的热切协程，而 Boost.Cobalt 任务是承诺的惰性版本。
+
+我们可以将它们视为不会像生成器那样产生多个值的函数。我们可以反复调用 Promise 来获取多个值，但调用之间不会保留状态（就像生成器一样）。基本上， Promise 是一个可以使用 co\_await 的协程（它也可以使用 co\_return）。
+
+Promise 的不同用例包括套接字侦听器接收网络数据包、处理数据包、查询数据库，然后从数据中生成一些结果。一般来说，它们的功能需要异步等待某个结果，然后对该结果执行某些处理（或者可能只是将其返回给调用者） 。
+
+我们的第一个例子是一个简单的承诺，它生成一个随机数（这也可以用生成器来完成）：
+
+\begin{cpp}
+#include <iostream>
+#include <random>
+
+#include <boost/cobalt.hpp>
+
+boost::cobalt::promise<int> random_number(int min, int max) {
+    std::random_device rd;
+    std::mt19937 gen(rd());
+
+    std::uniform_int_distribution<> dist(min, max);
+    co_return dist(gen);
+}
+
+boost::cobalt::promise<int> random(int min, int max) {
+    int res = co_await random_number(min, max);
+    co_return res;
+}
+
+boost::cobalt::main co_main(int, char*[]) {
+    for (int i = 0; i < 10; ++i) {
+        auto r = random(1, 100);
+        std::cout << "random number between 1 and 100: "
+                  << co_await r << std::endl;
+    }
+    co_return 0;
+}
+\end{cpp}
+
+在上面的代码中，我们编写了三个协程：
+
+\begin{itemize}
+\item
+co\_main：请记住，在 Boost.Cobalt 中， co\_main 是一个协同程序，它调用 co\_return 来返回一个值。
+
+\item
+random()：此协程向调用者返回一个随机数。它使用 co\_await 调用 random() 来生成随机数。它异步等待随机数生成。
+
+\item
+random\_number()：该协程在两个值（最小值和最大值）之间生成一个均匀分布的随机数，并将其返回给调用者。 random\_number() 也是一个promise。
+\end{itemize}
+
+以下协程返回一个随机数的 std::vector<int>。循环调用 co\_await random\_number() 来生成一个包含 n 个随机数的向量：
+
+\begin{cpp}
+boost::cobalt::promise<std::vector<int>> random_vector(int min, int
+max, int n) {
+    std::vector<int> rv(n);
+    for (int i = 0; i < n; ++i) {
+        rv[i] = co_await random_number(min, max);
+    }
+    co_return rv;
+}
+\end{cpp}
+
+上述函数返回 std::vector<int> 的承诺。要访问该向量，我们需要调用 get()：
+
+\begin{cpp}
+auto v = random_vector(1, 100, 20);
+for (int n : v.get()) {
+    std::cout << n << " ";
+}
+std::cout << std::endl;
+\end{cpp}
+
+上述代码打印了 v 向量的元素。要访问该向量，我们需要调用 v.get()。
+
+我们将实现第二个示例来说明承诺和任务的执行有何不同：
+
+\begin{cpp}
+#include <chrono>
+#include <iostream>
+#include <thread>
+
+#include <boost/cobalt.hpp>
+
+void sleep(){
+    std::this_thread::sleep_for(std::chrono::seconds(2));
+}
+
+boost::cobalt::promise<int> eager_promise(){
+    std::cout << "Eager promise started\n";
+    sleep();
+    std::cout << "Eager promise done\n";
+    co_return 1;
+}
+
+boost::cobalt::task<int> lazy_task(){
+    std::cout << "Lazy task started\n";
+    sleep();
+    std::cout << "Lazy task done\n";
+    co_return 2;
+}
+
+boost::cobalt::main co_main(int, char*[]){
+    std::cout << "Calling eager_promise...\n";
+    auto promise_result = eager_promise();
+    std::cout << "Promise called, but not yet awaited.\n";
+
+    std::cout << "Calling lazy_task...\n";
+    auto task_result = lazy_task();
+    std::cout << "Task called, but not yet awaited.\n";
+
+    std::cout << "Awaiting both results...\n";
+    int promise_value = co_await promise_result;
+    std::cout << "Promise value: " << promise_value
+              << std::endl;
+
+    int task_value = co_await task_result;
+    std::cout << "Task value: " << task_value
+              << std::endl;
+
+    co_return 0;
+}
+\end{cpp}
+
+在这个例子中，我们实现了两个协程：一个 Promise 和一个 Task。正如我们已经说过的， Promise 是 Eager 类型的，它在被调用时立即开始执行。而 Task 是 Lazy 类型的，它在被调用后就会被暂停。
+
+当我们运行程序时，它会打印所有消息，让我们确切地知道协程是如何执行的。
+
+co\_main()前三行执行完成后，打印输出如下：
+
+\begin{shell}
+Calling eager_promise...
+Eager promise started
+Eager promise done
+Promise called, but not yet awaited.
+\end{shell}
+
+从这些消息中，我们知道promise已经被执行了，直到调用co\_return。
+
+在执行 co\_main() 的接下来三行之后，打印输出有以下新消息：
+
+\begin{shell}
+Calling lazy_task...
+Task called, but not yet awaited.
+\end{shell}
+
+在这里，我们看到任务尚未执行。这是一个惰性协程，因此，它在被调用后会立即挂起，并且此协程尚未打印任何消息。
+
+再执行三行 co\_main()，程序输出的新消息如下：
+
+\begin{shell}
+Awaiting both results...
+Promise value: 1
+\end{shell}
+
+对承诺的 co\_await 调用给出了其结果（在本例中设置为 1）并且其执行结束。
+
+最后，我们在任务上调用 co\_await，然后它执行并返回其值（在本例中设置为 2）。输出如下：
+
+\begin{shell}
+Lazy task started
+Lazy task done
+Task value: 2
+\end{shell}
+
+此示例显示了任务如何惰性化并开始暂停，并且仅当调用者对其调用 co\_await 时才恢复执行。
+
+在本节中，我们已经看到，与生成器的情况一样，使用 Boost.Cobalt 编写承诺和任务协程比仅使用纯 C++ 要容易得多。我们不需要编写 C++ 实现协程所需的所有支持代码。我们还看到了任务和承诺之间的主要区别。
+
+在下一节中，我们将研究通道的示例，它是生产者/消费者模型中两个协程之间的通信机制。
+

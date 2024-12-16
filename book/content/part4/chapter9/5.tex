@@ -1,13 +1,271 @@
 
 
-\mySubsubsection{9.5.1.}{Single-threaded approach}
+I/O 执行上下文对象是线程安全的；它们的方法可以从不同的线程安全地调用。这意味着我们可以使用单独的线程来运行阻塞的 io\_context.run() 方法，并使主线程保持畅通，以继续执行其他不相关的任务。
 
-\mySubsubsection{9.5.2.}{Threaded long-running tasks}
+现在让我们从如何使用线程的角度解释一下配置异步应用程序的不同方法。
 
-\mySubsubsection{9.5.3.}{Multiple I/O execution context objects, one per thread}
+\mySubsubsection{9.5.1.}{单线程方法}
 
-\mySubsubsection{9.5.4.}{Multiple threads with a single I/O execution context object}
+任何 Boost.Asio 应用程序的起点和首选解决方案都应遵循单线程方法，其中 I/O 执行上下文对象在处理完成处理程序的同一线程中运行。这些处理程序必须简短且无阻塞。以下是与 I/ O 上下文在同一线程（即主线程）中运行的稳定计时器完成处理程序的示例：
 
-\mySubsubsection{9.5.5.}{Parallelizing work done by one I/O execution context}
+\begin{cpp}
+#include <boost/asio.hpp>
+#include <chrono>
+#include <iostream>
+
+using namespace std::chrono_literals;
+
+void handle_timer_expiry(
+            const boost::system::error_code& ec) {
+    if (!ec) {
+        std::cout << "Timer expired!\n";
+    } else {
+        std::cerr << "Error in timer: "
+                  << ec.message() << std::endl;
+    }
+}
+
+int main() {
+    boost::asio::io_context io_context;
+    boost::asio::steady_timer timer(io_context,
+                              std::chrono::seconds(1));
+    timer.async_wait(&handle_timer_expiry);
+    io_context.run();
+    return 0;
+}
+\end{cpp}
+
+我们可以看到， steady\_timer 计时器调用异步 async\_wait() 函数，设置 handle\_timer\_expiry() 完成处理程序，该函数在执行 io\_context.run() 函数的同一线程中。当异步函数完成时，其完成处理程序将在同一线程中运行。
+
+由于完成处理程序在主线程中运行，因此其执行应该很快，以避免冻结主线程和程序应执行的其他相关任务。在下一节中，我们将学习如何处理长时间运行的任务或完成处理程序并保持主线程响应。
+
+\mySubsubsection{9.5.2.}{线程化长时间运行的任务}
+
+对于长时间运行的任务，我们可以将逻辑保留在主线程中，但使用其他线程传递工作并将结果返回到主线程：
+
+\begin{cpp}
+#include <boost/asio.hpp>
+#include <iostream>
+#include <thread>
+
+void long_running_task(boost::asio::io_context& io_context,
+                       int task_duration) {
+    std::cout << "Background task started: Duration = "
+              << task_duration << " seconds.\n";
+    std::this_thread::sleep_for(
+                      std::chrono::seconds(task_duration));
+    io_context.post([&io_context]() {
+        std::cout << "Background task completed.\n";
+        io_context.stop();
+    });
+}
+
+int main() {
+    boost::asio::io_context io_context;
+
+    auto work_guard = boost::asio::make_work_guard
+                                            (io_context);
+
+    io_context.post([&io_context]() {
+        std::thread t(long_running_task,
+                      std::ref(io_context), 2);
+        std::cout << "Detaching thread" << std::endl;
+        t.detach();
+    });
+
+    std::cout << "Running io_context...\n";
+    io_context.run();
+    std::cout << "io_context exit.\n";
+    return 0;
+}
+\end{cpp}
+
+在这个例子中，在创建 io\_context 之后，使用工作保护来避免 io\_context.run() 函数在发布任何工作之前立即返回。
+
+已发布的工作包括创建 t 线程以在后台运行 long\_running\_task() 函数。该 t 线程在 lambda 函数退出之前分离；否则，程序将终止。
+
+在后台任务函数中，当前线程休眠一段时间，然后将另一个任务发布到 io\_context 对象中以打印消息并停止 io\_context 本身。如果我们不调用 io\_context.stop()，事件处理循环将永远继续运行，程序将无法完成，因为 io\_context.run() 将继续因工作保护而阻塞。
+
+\mySubsubsection{9.5.3.}{每线程一个 I/O 执行上下文对象}
+
+这种方法类似于单线程方法，其中每个线程都有自己的 io\_context 对象并处理简短且非阻塞的完成处理程序：
+
+\begin{cpp}
+#include <boost/asio.hpp>
+#include <chrono>
+#include <iostream>
+#include <syncstream>
+#include <thread>
+
+#define sync_cout std::osyncstream(std::cout)
+
+using namespace std::chrono_literals;
+
+void background_task(int i) {
+    sync_cout << "Thread " << i << ": Starting...\n";
+    boost::asio::io_context io_context;
+    auto work_guard =
+                boost::asio::make_work_guard(io_context);
+
+    sync_cout << "Thread " << i << ": Setup timer...\n";
+    boost::asio::steady_timer timer(io_context, 1s);
+    timer.async_wait(
+        [&](const boost::system::error_code& ec) {
+        if (!ec) {
+            sync_cout << "Timer expired successfully!"
+                      << std::endl;
+        } else {
+            sync_cout << "Timer error: "
+                      << ec.message() << ‚\n';
+        }
+        work_guard.reset();
+    });
+
+    sync_cout << "Thread " << i << ": Running
+                    io_context...\n";
+    io_context.run();
+}
+
+int main() {
+    const int num_threads = 4;
+    std::vector<std::jthread> threads;
+
+    for (auto i = 0; i < num_threads; ++i) {
+        threads.emplace_back(background_task, i);
+    }
+    return 0;
+}
+\end{cpp}
+
+在此示例中，创建了四个线程，每个线程运行 background\_task() 函数，其中创建一个 io\_context 对象，并设置一个计时器，与其完成处理程序一起在一秒后超时。
+
+\mySubsubsection{9.5.4.}{多线程使用一个 I/O 执行上下文对象}
+
+现在，只有一个 io\_context 对象，但它正在从不同线程的不同 I/O 对象启动异步任务。在这种情况下，可以从任何这些线程调用完成处理程序。以下是一个例子：
+
+\begin{cpp}
+#include <boost/asio.hpp>
+#include <chrono>
+#include <iostream>
+#include <syncstream>
+#include <thread>
+#include <vector>
+
+#define sync_cout std::osyncstream(std::cout)
+
+using namespace std::chrono_literals;
+
+void background_task(int task_id) {
+    boost::asio::post([task_id]() {
+        sync_cout << "Task " << task_id
+                  << " is being handled in thread "
+                  << std::this_thread::get_id()
+                  << std::endl;
+        std::this_thread::sleep_for(2s);
+        sync_cout << "Task " << task_id
+        << " complete.\n";
+    });
+}
+
+int main() {
+    boost::asio::io_context io_context;
+    auto work_guard = boost::asio::make_work_guard(
+                                    io_context);
+    std::jthread io_context_thread([&io_context]() {
+        io_context.run();
+    });
+
+    const int num_threads = 4;
+    std::vector<std::jthread> threads;
+    for (int i = 0; i < num_threads; ++i) {
+        background_task(i);
+    }
+
+    std::this_thread::sleep_for(5s);
+    work_guard.reset();
+
+    return 0;
+}
+\end{cpp}
+
+在此示例中，仅创建了一个 io\_context 对象，并在单独的线程 io\_context\_thread 中运行。然后，创建另外四个后台线程，将工作发布到 io\_context 对象中。最后，主线程等待五秒钟，让所有线程完成工作并重置工作保护，如果没有更多待处理工作，则让 io\_context.run() 函数返回。当程序退出时，所有线程都会自动加入，因为它们是 std::jthread 的实例。
+
+\mySubsubsection{9.5.5.}{单个 I/O 执行上下文并行完成工作}
+
+在上例中，使用了一个唯一的 I/O 执行上下文对象，其 run() 函数从不同的线程调用。然后，每个线程在完成时发布完成处理程序在可用线程中执行的一些工作。
+
+这是并行化一个 I/O 执行上下文所做工作的常用方法，即从多个线程调用其 run() 函数，将异步操作的处理分布在这些线程中。这是可能的，因为 io\_context 对象提供了一个线程安全的事件调度系统。
+
+下面是另一个示例，其中创建了一个线程池，每个线程都运行 io\_context.run()，使这些线程竞争从队列中拉取任务并执行它们。在这种情况下，使用两秒后到期的计时器仅创建一个异步任务。其中一个线程将拾取任务并执行它：
+
+\begin{cpp}
+#include <boost/asio.hpp>
+#include <iostream>
+#include <thread>
+#include <vector>
+
+using namespace std::chrono_literals;
+
+int main() {
+    boost::asio::io_context io_context;
+
+    boost::asio::steady_timer timer(io_context, 2s);
+    timer.async_wait(
+    [](const boost::system::error_code& /*ec*/) {
+        std::cout << "Timer expired!\n";
+    });
+
+    const std::size_t num_threads =
+                std::thread::hardware_concurrency();
+    std::vector<std::thread> threads;
+    for (std::size_t i = 0;
+        i < std::thread::hardware_concurrency(); ++i) {
+            threads.emplace_back([&io_context]() {
+                io_context.run();
+            });
+    }
+    for (auto& t : threads) {
+        t.join();
+    }
+    return 0;
+}
+\end{cpp}
+
+这种技术提高了可扩展性，因为应用程序可以更好地利用多个内核，并通过同时处理异步任务来减少延迟。此外，通过减少单线程代码处理许多同时 I/O 操作时产生的瓶颈，可以减少争用并提高吞吐量。
+
+请注意，如果完成处理程序在不同线程之间共享或修改共享资源，则它们也必须使用同步原语并且是线程安全的。
+
+此外，无法保证完成处理程序的执行顺序。由于许多线程可以同时运行，因此其中任何一个线程都可以先完成并调用其关联的完成处理程序。
+
+当线程竞争从队列中提取任务时，如果线程池大小不是最佳的（理想情况下与硬件线程数匹配，如本例所示），则可能存在潜在的锁争用或上下文切换开销。
+现在，是时候了解对象的生命周期如何影响我们使用 Boost.Asio 开发的异步程序的稳定性了。
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 

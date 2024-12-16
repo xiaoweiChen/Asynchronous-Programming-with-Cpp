@@ -1,5 +1,186 @@
 
+在本节中，我们将实现最后一个例子：一个简单的字符串解析器。协程将等待输入（一个 st d::string 对象），并在解析输入字符串后产生输出（一个数字）。为了简化示例，我们假设数字的字符串表示没有任何错误，并且数字的结尾由井号 \# 表示。我们还假设数字类型为 i nt64\_t，并且字符串不包含该整数类型范围之外的任何值。
 
-\mySubsubsection{8.6.1.}{The parsing algorithm}
+\mySubsubsection{8.6.1.}{解析算法}
 
-\mySubsubsection{8.6.2.}{The parsing coroutine}
+让我们看看如何将表示整数的字符串转换为数字。例如，字符串“-12321\#”表示数字 -1232 1。要将字符串转换为数字，我们可以编写如下函数：
+
+\begin{cpp}
+int64_t parse_string(const std::string& str) {
+    int64_t num{ 0 };
+    int64_t sign { 1 };
+
+    std::size_t c = 0;
+    while (c < str.size()) {
+        if (str[c] == '-') {
+            sign = -1;
+        }
+        else if (std::isdigit(str[c])) {
+            num = num * 10 + (str[c] - '0');
+        }
+        else if (str[c] == '#') {
+            break;
+        }
+        ++c;
+    }
+    return num * sign;
+}
+\end{cpp}
+
+由于假设字符串格式正确，因此代码非常简单。如果我们读取减号 -，则将其更改为 -1（默认情况下，我们假设为正数，如果有 + 符号，则将其忽略）。然后，逐个读取数字，并按如下方式计算数值。
+
+num 的初始值是 0。我们读取第一位数字，并将其数值添加到当前 num 值乘以 10 之后。这就是我们读取数字的方式：最左边的数字将乘以 10，次数与其右边的数字数量相同。
+
+当我们使用字符来表示数字时，它们根据 ASCII 表示具有一些值（我们假设不使用宽字符或任何其他字符类型）。字符 0 到 9 具有连续的 ASCII 码，因此我们只需减去 0 即可轻松将它们转换为数字。
+
+即使对于上述代码，最后一个字符检查不是必需的，但我们还是在此处包含了它。当解析器例程找到 \# 字符时，它会终止解析循环并返回最终的数字值。
+
+我们可以使用此函数来解析任何字符串并获取数字值，但我们需要完整的字符串才能将其转换为数字。
+
+让我们考虑一下这个场景：从网络连接接收到字符串，我们需要解析它并将其转换为数字。我们可以将字符保存到临时字符串中，然后调用前面的函数。
+
+但还有另一个问题：如果字符到达速度很慢，比如每隔几秒才到达一次，因为这就是字符的传输方式，那该怎么办？我们希望让 CPU 保持忙碌，如果可能的话，在等待每个字符到达时执行一些其他任务（或任务）。
+
+解决这个问题的方法有很多种。我们可以创建一个线程并同时处理字符串，但对于这样一个简单的任务来说，这会浪费大量的计算机时间。我们也可以使用 std::async。
+
+\mySubsubsection{8.6.2.}{解析协程}
+
+本章我们将使用协程，因此我们将使用 C++ 协程实现字符串解析器。我们不需要额外的线程，而且由于协程的异步特性，在字符到达时执行任何其他处理都非常容易。
+
+解析协程所需的样板代码与我们在前面的示例中已经看到的代码几乎相同。解析器本身则完全不同。请参阅以下代码：
+
+\begin{cpp}
+async_parse<int64_t, char> parse_string() {
+    while (true) {
+        char c = co_await char{ };
+        int64_t number { };
+        int64_t sign { 1 };
+
+        if (c != '-' && c != '+' && !std::isdigit(c)) {
+            continue;
+        }
+        if (c == '-') {
+            sign = -1;
+        }
+        else if (std::isdigit(c)) {
+            number = number * 10 + c - '0';
+        }
+
+        while (true) {
+            c = co_await char{};
+            if (std::isdigit(c)) {
+                number = number * 10 + c - '0';
+            }
+            else {
+                break;
+            }
+        }
+        co_yield number * sign;
+    }
+}
+\end{cpp}
+
+我认为您现在可以轻松识别返回类型（async\_parse<int64\_t、 char>），并且解析器协程会暂停自身以等待输入字符。解析完成后，协程将在产生数字后暂停自身。
+
+但是您也可以看到，前面的代码并不像我们第一次尝试将字符串解析为数字那么简单。
+
+首先，解析器协程会逐个解析字符。它不会获取完整的字符串进行解析，因此会无限循环while (true)。我们不知道完整字符串中有多少个字符，因此我们需要继续接收和解析它们。
+
+外循环意味着协程将随着字符的到来而一个接一个地解析数字——永远如此。但请记住，它会暂停自身以等待字符，这样我们就不会浪费 CPU 时间。
+
+现在，一个字符到达。首先检查它是否是我们数字的有效字符。如果该字符不是减号 -、加号 + 或数字，则解析器等待下一个字符。
+
+如果下一个字符是有效字符，则适用以下情况：
+
+\begin{itemize}
+\item
+如果是减号，我们将符号值改为 -1
+
+\item
+如果是加号，我们忽略它
+
+\item
+如果是数字，我们将其解析为数字，并使用与解析器的第一个版本中看到的相同方法更新当前数字值
+\end{itemize}
+
+在第一个有效字符之后，我们进入一个新的循环来接收其余的字符，无论是数字还是分隔符 (\#)。请注意，当我们说有效字符时，我们指的是适合数字转换。我们仍然假设输入的字符形成一个正确终止的有效数字。
+
+一旦数字被转换，协程就会将其返回，然后再次执行外循环。这里需要终止字符，因为输入字符流理论上是无穷无尽的，并且可以包含许多数字。
+
+协程其余部分的代码可以在 GitHub 仓库中找到。它遵循与任何其他协程相同的约定。首先，我们定义返回类型：
+
+\begin{cpp}
+template <typename Out, typename In>
+struct async_parse {
+    // …
+};
+\end{cpp}
+
+我们使用模板来提高灵活性，因为它允许我们参数化输入和输出数据类型。在本例中，这些类型分别是 int64\_t 和 char。
+
+输入和输出数据项如下：
+
+\begin{cpp}
+std::optional<In> input_data { };
+Out output_data { };
+\end{cpp}
+
+对于输入，我们使用 std::optional<In>，因为我们需要一种方法来知道我们是否收到了一个字符。我们使用 put() 函数将字符发送到解析器：
+
+\begin{cpp}
+void put(char c) {
+    handle.promise().input_data = c;
+    if (!handle.done()) {
+        handle.resume();
+    }
+}
+\end{cpp}
+
+此函数仅将值赋给 std::optional input\_data 变量。为了管理字符的等待，我们实现了以下 awaiter 类型：
+
+\begin{cpp}
+auto await_transform(char) noexcept {
+    struct awaiter {
+        promise_type& promise;
+
+        [[nodiscard]] bool await_ready() const noexcept {
+            return promise.input_data.has_value();
+        }
+
+        [[nodiscard]] char await_resume() const noexcept {
+            assert (promise.input_data.has_value());
+            return *std::exchange(
+                            promise.input_data,
+                            std::nullopt);
+        }
+
+        void await_suspend(std::coroutine_handle<
+                           promise_type>) const noexcept {
+        }
+    };
+    return awaiter(*this);
+}
+\end{cpp}
+
+awaiter 结构实现了两个函数来处理输入数据：
+
+\begin{itemize}
+\item
+await\_ready()：如果可选的 input\_data 变量包含有效值，则返回 true。否则返回 false。
+
+\item
+await\_resume()：返回存储在可选 input\_data 变量中的值并将其清空，并将其分配给 std::nullopt。
+\end{itemize}
+
+在本节中，我们了解了如何使用 C++ 协程实现一个简单的解析器。这是我们的最后一个例子，说明了使用协程实现的一个非常基本的流处理功能。在下一节中，我们将看到协程中的异常。
+
+
+
+
+
+
+
+
+
+
+

@@ -1,5 +1,175 @@
 
+缓冲区是 I/O 操作期间用于传输数据的连续内存区域。
 
-\mySubsubsection{9.7.1.}{Scatter-gather operations}
+Boost.Asio 定义了两种类型的缓冲区：可变缓冲区 (boost::asio::mutable\_buffer)，其中可以写入数据；常量缓冲区 (boost::asio::const\_buffers)，用于创建只读缓冲区。可变缓冲区可以转换为常量缓冲区，但不能转换为常量缓冲区。这两种类型的缓冲区都提供溢出保护。
 
-\mySubsubsection{9.7.2.}{Stream buffers}
+还有 boost::buffer 函数来帮助从不同数据类型（指向原始内存和大小的指针、字符串 (std::string) 或普通旧数据 (POD) 结构数组或向量（意味着类型、结构或类没有用户定义的复制赋值运算符或析构函数，也没有私有或受保护的非静态数据成员）创建可变或常量缓冲区。例如，要从字符数组创建缓冲区，我们可以使用以下命令：
+
+\begin{cpp}
+char data[1024];
+mutable_buffer buffer = buffer(data, sizeof(data));
+\end{cpp}
+
+另请注意，缓冲区的所有权和生存期是程序的责任，而不是 Boost.Asio 库的责任。
+
+\mySubsubsection{9.7.1.}{分散-聚集操作}
+
+可以通过使用分散-集中操作来高效使用缓冲区，其中多个缓冲区一起用于接收数据（分散- 读取）或发送数据（集中-写入）。
+
+分散-读取:是将数据从唯一源读取到不同的不连续内存缓冲区的过程。
+
+聚集-写入:是相反的过程；数据从不同的不连续的内存缓冲区聚集并写入单个目的地。
+
+这些技术可以减少系统调用或数据复制的次数，从而提高效率和性能。它们不仅用于 I/O 操作，还可用于其他用例，例如数据处理、机器学习或并行算法（例如排序或矩阵乘法）。
+
+为了允许分散-集中操作，可以将多个缓冲区一起传递到容器（std::vector、 std::list、 std::arra y 或 boost::array）内的异步操作。
+
+下面是一个散射读取的例子，其中套接字将一些数据异步读入 buf1 和 buf2 缓冲区：
+
+\begin{cpp}
+std::array<char, 128> buf1, buf2;
+std::vector<boost::asio::mutable_buffer> buffers = {
+    boost::asio::buffer(buf1),
+    boost::asio::buffer(buf2)
+};
+socket.async_read_some(buffers, handler);
+\end{cpp}
+
+以下是如何实现聚集读取：
+
+\begin{cpp}
+std::array<char, 128> buf1, buf2;
+std::vector<boost::asio::const_buffer> buffers = {
+    boost::asio::buffer(buf1),
+    boost::asio::buffer(buf2)
+};
+socket.async_write_some(buffers, handler);
+\end{cpp}
+
+现在，套接字执行相反的操作，将两个缓冲区中的一些数据写入套接字缓冲区以进行异步发送。
+
+\mySubsubsection{9.7.2.}{流缓冲区}
+
+我们还可以使用流缓冲区来管理数据。流缓冲区由 boost::asio::basic\_streambuf 类定义，该类基于 std::basic\_streambuf C++ 类，并在 <streambuf> 头文件中定义。它允许动态缓冲区，其大小可以适应正在传输的数据量。
+
+让我们在以下示例中看看流缓冲区如何与分散-集中操作协同工作。在本例中，我们实现了一个 TCP 服务器，该服务器监听并接受来自给定端口的客户端连接，将客户端发送的消息读入两个流缓冲区，并将其内容打印到控制台。由于我们有兴趣了解流缓冲区和分散-集中操作，让我们通过使用同步操作来简化示例。
+
+与上例一样，在 main() 函数中，我们使用 boost::asio::ip::tcp::acceptor 对象来设置 TCP 服务器用于接受连接的协议和端口。然后，在无限循环中，服务器使用该 acceptor 对象连接 TC P 套接字 (boost::asio::ip::tcp::socket) 并调用 handle\_client() 函数：
+
+\begin{cpp}
+#include <array>
+#include <iostream>
+#include <boost/asio.hpp>
+#include <boost/asio/streambuf.hpp>
+
+using boost::asio::ip::tcp;
+
+constexpr int port = 1234;
+
+int main() {
+    try {
+        boost::asio::io_context io_context;
+        tcp::acceptor acceptor(io_context,
+                        tcp::endpoint(tcp::v4(), port));
+        std::cout << "Server is running on port "
+                  << port << "...\n";
+
+        while (true) {
+            tcp::socket socket(io_context);
+            acceptor.accept(socket);
+            std::cout << "Client connected...\n";
+
+            handle_client(socket);
+            std::cout << "Client disconnected...\n";
+        }
+    } catch (std::exception& e) {
+        std::cerr << "Exception: " << e.what() << '\n';
+    }
+    return 0;
+}
+\end{cpp}
+
+handle\_client() 函数创建两个流缓冲区： buf1 和 buf2，并将它们添加到容器（在本例中为 std ::array）中，以用于分散-聚集操作。
+
+然后，调用套接字的同步 read\_some() 函数。此函数返回从套接字读取的字节数并将它们复制到缓冲区中。如果套接字连接出现任何问题，则会在错误代码对象中返回错误。在这种情况下，服务器将打印错误消息并退出。
+
+实现如下：
+
+\begin{cpp}
+void handle_client(tcp::socket& socket) {
+    const size_t size_buffer = 5;
+    boost::asio::streambuf buf1, buf2;
+
+    std::array<boost::asio::mutable_buffer, 2> buffers = {
+        buf1.prepare(size_buffer),
+        buf2.prepare(size_buffer)
+    };
+
+    boost::system::error_code ec;
+    size_t bytes_recv = socket.read_some(buffers, ec);
+    if (ec) {
+        std::cerr << "Error on receive: "
+                  << ec.message() << '\n';
+
+        return;
+    }
+
+    std::cout << "Received " << bytes_recv << " bytes\n";
+
+    buf1.commit(5);
+    buf2.commit(5);
+
+    std::istream is1(&buf1);
+    std::istream is2(&buf2);
+    std::string data1, data2;
+    is1 >> data1;
+    is2 >> data2;
+
+    std::cout << "Buffer 1: " << data1 << std::endl;
+    std::cout << "Buffer 2: " << data2 << std::endl;
+}
+\end{cpp}
+
+如果没有错误，则使用流缓冲区的 commit() 函数将五个字节传输到流缓冲区 buf1 和 buf2 中。使用 std::istream 对象提取这些缓冲区的内容并将其打印到控制台。
+
+要执行此示例，我们需要打开两个终端。在一个终端中，我们执行服务器，在另一个终端中，执行 telnet 命令，如前所示。在 telnet 终端中，我们可以输入一条消息（例如， "Hello World"）。此消息将发送到服务器。然后服务器终端将显示以下内容：
+
+\begin{shell}
+Server is running on port 1234...
+Client connected...
+Received 10 bytes
+Buffer 1: Hello
+Buffer 2: Worl
+Client disconnected...
+\end{shell}
+
+我们可以看到，只有 10 个字节被处理并分配到两个缓冲区中。两个单词之间的空格字符被处理但在 iostream 对象解析输入时被丢弃。
+
+当传入数据的大小可变且事先未知时，流缓冲区非常有用。这些类型的缓冲区可以与固定大小的缓冲区一起使用。
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

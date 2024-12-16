@@ -1,0 +1,123 @@
+Boost.Asio 自 1.56.0 版本起还包含对协程的支持，并从 1.75.0 版本起支持本机协程。
+
+正如我们在上一章中了解到的，使用协程可以简化程序的编写方式，因为无需添加完成处理程序并将程序流程拆分为不同的异步函数和回调。相反，使用协程时，程序遵循顺序结构，其中异步操作调用会暂停协程的执行。当异步操作完成时，协程将恢复，让程序从之前暂停的位置继续执行。
+
+在较新的版本（1.75.0 以上）中，我们可以通过 co\_await 使用本机 C++ 协程，等待协程内的异步操作，使用 boost::asio::co\_spawn 启动协程，并使用 boost::asio::use\_awaitable 让 Boost.Asio 知道异步操作将使用协程。在较早的版本（从 1.56.0 开始）中，可以使用 boost::asio:: spawn() 和 Yield 上下文来使用协程。由于我们更喜欢较新的方法，不仅因为它支持本机 C++20 协程，而且代码也更现代、更干净、更易读，我们将在本节中重点介绍这种方法。
+
+让我们再次实现回显服务器，但这次使用 Boost.Asio 的可等待接口和协程。我们还将添加一些改进，例如支持在发送 QUIT 命令时从客户端关闭连接，显示如何在服务器端处理数据或命令，以及在抛出任何异常时停止处理连接并退出。
+
+让我们从实现 main() 函数开始。程序首先使用 boost::asio::co\_spawn 创建一个基于协程的新线程。此函数接受执行上下文（io\_context，但也可以使用 strand）、具有 boost::asio::awaitable<R,E> 返回类型的函数（将用作协程的入口点）（我们将在下文实现和解释的 listener() 函数）以及将在线程完成时调用的完成令牌作为参数。如果我们想在不收到完成通知的情况下运行协程，我们可以传递 boost::asio::detached 令牌。
+
+最后，我们通过调用io\_context.run()开始处理异步事件。
+
+如果发生任何异常，它将被 try-catch 块捕获，并通过调用 io\_context.stop() 停止事件处理循环：
+
+\begin{cpp}
+#include <boost/asio.hpp>
+#include <iostream>
+#include <sstream>
+#include <string>
+
+using boost::asio::ip::tcp;
+
+int main() {
+    boost::asio::io_context io_context;
+    try {
+        boost::asio::co_spawn(io_context,
+                    listener(io_context, 12345),
+                    boost::asio::detached);
+        io_context.run();
+    } catch (std::exception& e) {
+        std::cerr << "Error: " << e.what() << std::endl;
+        io_context.stop();
+    }
+    return 0;
+}
+\end{cpp}
+
+listener() 函数接收一个 io\_context 对象和侦听器将接受连接的端口号作为参数，使用前面解释过的接受器对象。它还必须具有 boost::asio::awaitable<R,E> 的返回类型，其中 R 是协程的返回类型， E 是可能抛出的异常类型。在此示例中， E 设置为默认值，因此未明确指定。
+
+通过调用 async\_accept 接受函数来接受连接。由于我们现在使用协程，我们需要为异步函数指定 boost::asio::use\_awaitable 并使用 co\_await 停止协程执行，直到异步任务完成后才恢复。
+
+当侦听器协程任务恢复时， acceptor.async\_accept() 返回一个套接字对象。协程继续生成一个新线程，使用 boost::asio::co\_spawn 函数，执行 echo() 函数，并将套接字对象传递给它：
+
+\begin{cpp}
+boost::asio::awaitable<void> listener(boost::asio::io_context& io_context, unsigned short port) {
+    tcp::acceptor acceptor(io_context,
+                           tcp::endpoint(tcp::v4(), port));
+    while (true) {
+        std::cout << "Accepting connections...\n";
+        tcp::socket socket = co_await
+            acceptor.async_accept(
+                boost::asio::use_awaitable);
+
+        std::cout << "Starting an Echo "
+                  << "connection handler...\n";
+        boost::asio::co_spawn(io_context,
+                              echo(std::move(socket)),
+                              boost::asio::detached);
+    }
+}
+\end{cpp}
+
+echo() 函数负责处理单个客户端连接。它必须遵循与 listener() 函数类似的签名；它需要返回boost::asio::awaitable<R,E> 类型。如前所述，套接字对象从侦听器移入此函数。
+
+该函数以异步方式从套接字读取内容并将其写回无限循环中，只有在收到 QUIT 命令或引发异常时才会完成。
+
+异步读取是通过使用 socket.async\_read\_some() 函数完成的，该函数使用 boost::asio::buffer 将数据读入数据缓冲区并返回读取的字节数 (bytes\_read)。由于异步任务由协程管理，因此 bo ost::asio::use\_awaitable 被传递给异步操作。然后， co\_wait 只是指示协程引擎暂停执行，直到异步操作完成。
+
+一旦接收到一些数据，协程就会恢复执行，检查是否真的有一些数据需要处理，否则，它通过退出循环来结束连接，从而退出 echo() 函数。
+
+如果读取了数据，它会将其转换为 std::string 以便于操作。它会删除 \verb|\r\n| 结尾（如果存在） ，并将字符串与 QUIT 进行比较。
+
+如果存在 QUIT，它将执行异步写入，发送 "Good bye!" 消息，然后退出循环。否则，它将接收到的数据发送回客户端。在这两种情况下，异步写入操作都是通过使用 boost::asio::async\_write() 函数执行的，传递套接字、 boost:asio::buffer 包装要发送的数据缓冲区，以及 boost::asio::use\_awaitable，就像异步读取操作一样。
+
+然后，再次使用 co\_await 在执行操作时暂停协程的执行。完成后，协程将恢复并在新的循环迭代中重复以下步骤：
+
+\begin{cpp}
+boost::asio::awaitable<void> echo(tcp::socket socket) {
+    char data[1024];
+
+    while (true) {
+        std::cout << "Reading data from socket...\n";
+        std::size_t bytes_read = co_await
+                 socket.async_read_some(
+                        boost::asio::buffer(data),
+                        boost::asio::use_awaitable);
+
+        if (bytes_read == 0) {
+            std::cout << "No data. Exiting loop...\n";
+            break;
+        }
+
+        std::string str(data, bytes_read);
+        if (!str.empty() && str.back() == '\n') {
+            str.pop_back();
+        }
+        if (!str.empty() && str.back() == '\r') {
+            str.pop_back();
+        }
+
+        if (str == "QUIT") {
+            std::string bye("Good bye!\n");
+            co_await boost::asio::async_write(socket,
+                        boost::asio::buffer(bye),
+                        boost::asio::use_awaitable);
+            break;
+        }
+
+        std::cout << "Writing '" << str
+                  << "' back into the socket...\n";
+        co_await boost::asio::async_write(socket,
+                    boost::asio::buffer(data,
+                                        bytes_read),
+                    boost::asio::use_awaitable);
+    }
+}
+\end{cpp}
+
+协程循环直到没有读取到数据，当客户端关闭连接、收到QUIT命令或者发生异常时都会发生这种情况。
+
+始终使用异步操作来确保服务器保持响应，即使同时处理多个客户端。
+
+

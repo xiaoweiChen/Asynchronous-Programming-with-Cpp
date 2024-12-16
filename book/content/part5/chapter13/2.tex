@@ -1,7 +1,636 @@
 
 
-\mySubsubsection{13.2.1.}{In-code profiling}
+要了解应用程序的性能，我们需要能够对其进行测量。如果本章有一个关键要点，那就是永远不要估计或猜测代码性能。要知道您的程序是否满足其性能要求（延迟或吞吐量），您需要测量、测量，然后再测量。
 
-\mySubsubsection{13.2.2.}{Code micro-benchmarks}
+获得性能测试数据后，您就会知道代码中的热点。它们可能与内存访问模式或线程争用有关（例如，多个线程必须等待获取锁才能访问资源）。这是第二个最重要的要点发挥作用的地方：在优化应用程序时设定目标。不要以实现最佳性能为目标，因为总会有改进的空间。正确的做法是设定一个明确的规范，例如事务的最大处理时间或每秒处理的网络数据包数量。
 
-\mySubsubsection{13.2.3.}{The Linux perf tool}
+考虑到这两个主要思想，让我们从可以用来测量代码性能的不同方法开始。
+
+\mySubsubsection{13.2.1.}{码内分析}
+
+开始了解代码性能的一个非常简单但有用的方法是代码内分析，它包括添加一些额外的代码来测量某些代码段的执行时间。在我们编写代码时，这种方法很适合用作工具（当然，我们需要访问源代码）。这将使我们能够发现代码中的一些性能问题，正如我们将在本章后面看到的那样。
+
+我们将使用 std::chrono 作为分析代码的初始方法。
+
+下面的代码片段展示了如何使用 std::chrono 对我们的代码进行一些基本分析：
+
+\begin{cpp}
+auto start = std::chrono::high_resolution_clock::now();
+// processing to profile
+auto end = std::chrono::high_resolution_clock::now();
+
+auto duration = std::chrono::duration_
+cast<std::chrono::milliseconds>(end - start);
+std::cout < duration.count() << " milliseconds\n";
+\end{cpp}
+
+在这里，我们获取两个时间样本，它们调用 high\_resolution\_clock::now() 并打印转换为毫秒的时间间隔。根据我们估计处理所需的时间，我们可以使用微秒或秒等单位。使用这种简单的技术，我们可以轻松了解处理所需的时间，并且可以轻松比较不同的选项。
+
+这里， std::chrono::high\_resolution\_clock 是提供最高精度（实现提供的最小滴答周期）的时钟类型。 C++ 标准库允许它成为 std::chrono::system\_clock 或 std::chrono::steady\_clock 的别名。 libstdc++ 将其别名为 std::chrono::system\_clock，而 libc++ 使用 std::chrono::steady\_clock。对于本章中的示例，我们使用了 GCC 和 libstdc++。时钟分辨率为 1 纳秒：
+
+\begin{cpp}
+/**
+ * @brief Highest-resolution clock
+ *
+ * This is the clock "with the shortest tick period." Alias to
+ * std::system_clock until higher-than-nanosecond definitions
+ * become feasible.
+ * @ingroup chrono
+*/
+using high_resolution_clock = system_clock;
+\end{cpp}
+
+现在，让我们看一个完整的示例，该示例分析了两个 C++ 标准库算法来对向量进行排序 – std::sort 和 std::stable\_sort：
+
+\begin{cpp}
+#include <algorithm>
+#include <chrono>
+#include <iostream>
+#include <random>
+#include <utility>
+
+int uniform_random_number(int min, int max) {
+    static std::random_device rd;
+    static std::mt19937 gen(rd());
+    std::uniform_int_distribution dis(min, max);
+    return dis(gen);
+}
+
+std::vector<int> random_vector(std::size_t n, int32_t min_val, int32_t
+max_val) {
+    std::vector<int> rv(n);
+    std::ranges::generate(rv, [&] {
+        return uniform_random_number(min_val, max_val);
+    });
+    return rv;
+}
+
+using namespace std::chrono;
+
+int main() {
+    constexpr uint32_t elements = 100000000;
+    int32_t minval = 1;
+    int32_t maxval = 1000000000;
+
+    auto rv1 = random_vector(elements, minval, maxval);
+    auto rv2 = rv1;
+
+    auto start = high_resolution_clock::now();
+    std::ranges::sort(rv1);
+    auto end = high_resolution_clock::now();
+    auto duration = duration_cast<milliseconds>(end - start);
+    std::cout << "Time to std::sort "
+              << elements << " elements with values in ["
+              << minval << "," << maxval << "] "
+              << duration.count() << " milliseconds\n";
+
+    start = high_resolution_clock::now();
+    std::ranges::stable_sort(rv2);
+    end = high_resolution_clock::now();
+    duration = duration_cast<milliseconds>(end - start);
+    std::cout << "Time to std::stable_sort "
+              << elements << " elements with values in ["
+              << minval << "," << maxval << "] "
+              << duration.count() << " milliseconds\n";
+    return 0;
+}
+\end{cpp}
+
+上述代码生成一个正态分布的随机数向量，然后使用 std::sort() 和 std::stable\_sort() 对向量进行排序。这两个函数都对向量进行排序，但 std::sort() 使用快速排序和插入排序算法的组合（称为 introsort），而 std::stable\_sort() 使用合并排序。排序是稳定的，因为等效键在原始向量和排序后的向量中具有相同的顺序。对于整数向量，这并不重要，但如果向量有三个具有相同值的元素，则对向量进行排序后，数字将处于相同的顺序。
+
+运行代码后，我们得到以下输出：
+
+\begin{shell}
+Time to std::sort 100000000 elements with values in [1,1000000000]
+6019 milliseconds
+Time to std::stable_sort 100000000 elements with values in
+[1,1000000000] 7342 milliseconds
+\end{shell}
+
+在这个例子中， std::stable\_sort() 比 std::sort() 慢。
+
+在本节中，我们了解了一种测量代码部分运行时间的简单方法。这种方法具有侵入性，需要我们修改代码；它主要用于开发应用程序。在下一节中，我们将介绍另一种测量执行时间的方法，称为微基准测试。
+
+\mySubsubsection{13.2.2.}{代码微基准测试}
+
+有时，我们只想单独分析一小段代码。我们可能需要多次运行它，然后获取平均运行时间，或者使用不同的输入数据运行它。在这些情况下，我们可以使用基准测试（也称为微基准测试）库来做到这一点 - 在不同条件下执行代码的一小部分。
+
+必须使用微基准测试作为指导。请记住，代码是独立运行的，由于代码不同部分之间存在许多复杂的交互，当我们一起运行所有代码时，这可能会给我们带来截然不同的结果。请谨慎使用它们，并注意微基准测试可能会产生误导。
+
+我们可以使用许多库来对代码进行基准测试。我们将使用 Google Benchmark，这是一个非常好且著名的库。
+
+让我们首先获取代码并编译库。要获取代码，请运行以下命令：
+
+\begin{shell}
+git clone https://github.com/google/benchmark.git
+cd benchmark
+git clone https://github.com/google/googletest.git
+\end{shell}
+
+一旦我们获得了基准和 Google 测试库（后者需要编译前者）的代码，我们就会构建它。
+
+为构建创建一个目录：
+
+\begin{shell}
+mkdir build
+cd build
+\end{shell}
+
+这样，我们在基准目录中创建了构建目录。
+
+接下来，我们将使用 CMake 来配置构建并创建 make 所需的所有信息：
+
+\begin{shell}
+cmake .. -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBRARIES=ON -DCMAKE_INSTALL_PREFIX=/usr/lib/x86_64-linux-gnu/
+\end{shell}
+
+最后，运行 make 来构建并安装库：
+
+\begin{shell}
+make -j16
+sudo make install
+\end{shell}
+
+您还需要将库添加到 CmakeLists.txt 文件中。我们已经在本书的代码中为您完成了这一操作。
+安装 Google Benchmark 后，我们可以通过一个包含一些基准测试函数的示例来学习如何使用该库进行一些基本的基准测试。
+
+请注意， std::chrono 和 Google Benchmark 都不是用于处理异步/多线程代码的专用工具，而更像是通用工具。
+
+这是我们使用 Google Benchmark 的第一个示例：
+
+\begin{cpp}
+#include <benchmark/benchmark.h>
+#include <algorithm>
+#include <chrono>
+#include <iostream>
+#include <random>
+#include <thread>
+
+void BM_vector_push_back(benchmark::State& state) {
+    for (auto _ : state) {
+        std::vector<int> vec;
+        for (int i = 0; i < state.range(0); i++) {
+            vec.push_back(i);
+        }
+    }
+}
+
+void BM_vector_emplace_back(benchmark::State& state) {
+    for (auto _ : state) {
+        std::vector<int> vec;
+        for (int i = 0; i < state.range(0); i++) {
+            vec.emplace_back(i);
+        }
+    }
+}
+
+void BM_vector_insert(benchmark::State& state) {
+    for (auto _ : state) {
+        std::vector<int> vec;
+        for (int i = 0; i < state.range(0); i++) {
+            vec.insert(vec.begin(), i);
+        }
+    }
+}
+
+BENCHMARK(BM_vector_push_back)->Range(1, 1000);
+BENCHMARK(BM_vector_emplace_back)->Range(1, 1000);
+BENCHMARK(BM_vector_insert)->Range(1, 1000);
+
+int main(int argc, char** argv) {
+    benchmark::Initialize(&argc, argv);
+    benchmark::RunSpecifiedBenchmarks();
+    return 0;
+}
+\end{cpp}
+
+我们需要包含库头文件：
+
+\begin{cpp}
+#include <benchmark/benchmark.h>
+\end{cpp}
+
+所有基准测试函数均具有以下签名：
+
+\begin{cpp}
+void benchmark_function(benchmark::State& state);
+\end{cpp}
+
+这是一个带有一个参数的函数，即 benchmark::State\& state，返回 void。 benchmark::State 参数具有双重用途：
+
+\begin{itemize}
+\item
+控制迭代循环： benchmark::State 对象用于控制基准测试函数或代码片段的执行次数。通过重复测试足够多次以尽量减少变化并收集有意义的数据，这有助于准确测量性能。
+
+\item
+测量时间和统计数据：状态对象跟踪基准代码的运行时间，并提供报告指标（例如:经过时间、迭代和自定义计数器）的机制。
+\end{itemize}
+
+我们实现了三个函数，以不同的方式对向 std::vector 序列添加元素进行基准测试：第一个函数使用 std::vector::push\_back，第二个函数使用 std::vector::emplace\_back，第三个函数使用 std::vector::insert。前两个函数在向量的末尾添加元素，而第三个函数在向量的开头添加元素。
+
+一旦我们实现了基准测试函数，我们就需要告诉库它们必须作为基准运行：
+
+\begin{cpp}
+BENCHMARK(BM_vector_push_back)->Range(1, 1000);
+\end{cpp}
+
+我们使用 BENCHMARK 宏来执行此操作。对于此示例中的基准测试，我们设置每次迭代中要插入到向量中的元素数量。范围从 1 到 1000，每次迭代将插入前一次迭代的元素数量的八倍，直到达到最大值。在本例中，它将插入 1、 8、 64、 512 和 1,000 个元素。
+
+当我们运行第一个基准测试程序时，我们得到以下输出：
+
+\begin{shell}
+2024-10-17T05:02:37+01:00
+Running ./13x02-benchmark_vector
+Run on (64 X 3600 MHz CPU s)
+CPU Caches:
+  L1 Data 32 KiB (x32)
+  L1 Instruction 32 KiB (x32)
+  L2 Unified 512 KiB (x32)
+  L3 Unified 32768 KiB (x4)
+Load Average: 0.00, 0.02, 0.16
+----------------------------------------------------------------------
+Benchmark                         Time               CPU    Iterations
+----------------------------------------------------------------------
+BM_vector_push_back/1          10.5 ns           10.5 ns      63107997
+BM_vector_push_back/8          52.0 ns           52.0 ns      13450361
+BM_vector_push_back/64          116 ns            116 ns       6021740
+BM_vector_push_back/512         385 ns            385 ns       1819732
+BM_vector_push_back/1000        641 ns            641 ns       1093474
+BM_vector_emplace_back/1       10.8 ns           10.8 ns      64570848
+BM_vector_emplace_back/8       53.3 ns           53.3 ns      13139191
+BM_vector_emplace_back/64       108 ns            108 ns       6469997
+BM_vector_emplace_back/512      364 ns            364 ns       1924992
+BM_vector_emplace_back/1000     616 ns            616 ns       1138392
+BM_vector_insert/1             10.6 ns           10.6 ns      65966159
+BM_vector_insert/8             58.6 ns           58.6 ns      11933446
+BM_vector_insert/64             461 ns            461 ns       1485319
+BM_vector_insert/512           7249 ns           7249 ns         96756
+BM_vector_insert/1000         23352 ns          23348 ns         29742
+\end{shell}
+
+首先，该程序打印有关基准测试执行的信息：日期和时间、可执行文件的名称以及有关其运行的 CPU 的信息。
+
+看一下下面这一行：
+
+\begin{shell}
+Load Average: 0.00, 0.02, 0.16
+\end{shell}
+
+这一行给出了 CPU 负载的估计值：从 0.0（完全没有负载或负载很低）到 1.0（满载）。这三个数字分别对应过去 5、 10 和 15 分钟的 CPU 负载。
+
+在打印 CPU 负载信息后，基准测试会打印每次迭代的结果。以下是示例：
+
+\begin{shell}
+BM_vector_push_back/64     116 ns         116 ns      6021740
+\end{shell}
+
+这意味着在将 64 个元素插入向量时， BM\_vector\_push\_back 被调用了 6,021,740 次（迭代次数）。
+
+时间和 CPU 列给出了每次迭代的平均时间：
+
+\begin{itemize}
+\item
+时间：这是每次基准测试执行从开始到结束的实际时间。它包括基准测试期间发生的所有事情： CPU 计算、 I/O 操作、上下文切换等。
+
+\item
+CPU 时间：这是 CPU 处理基准测试指令所花费的时间。它可以小于或等于时间。
+\end{itemize}
+
+在我们的基准测试中，由于操作简单，我们可以看到时间和 CPU 大致相同。
+
+从结果来看，我们可以得出以下结论：
+
+\begin{itemize}
+\item
+对于简单对象（例如 32 位整数）， push\_back 和 emplace\_back 所花费的时间相同。
+
+\item
+在这里，对于少量元素， insert 所花的时间与 push\_back/emplace\_back 相同，但从 64 个元素开始，它所花的时间就多得多。这是因为 insert 必须在每次插入后复制所有元素（ 我们将元素插入到向量的开头）。
+\end{itemize}
+
+下面的示例也对 std::vector 序列进行排序，但这次，我们将使用微基准测试来测量执行时间：
+
+\begin{cpp}
+#include <benchmark/benchmark.h>
+
+#include <algorithm>
+#include <chrono>
+#include <iostream>
+#include <random>
+#include <thread>
+
+std::vector<int> rv1, rv2;
+
+int uniform_random_number(int min, int max) {
+    static std::random_device rd;
+    static std::mt19937 gen(rd());
+    std::uniform_int_distribution dis(min, max);
+    return dis(gen);
+}
+
+std::vector<int> random_vector(std::size_t n, int32_t min_val, int32_t
+max_val) {
+    std::vector<int> rv(n);
+    std::ranges::generate(rv, [&] {
+        return uniform_random_number(min_val, max_val);
+    });
+    return rv;
+}
+
+static void BM_vector_sort(benchmark::State& state, std::vector<int>&
+vec) {
+    for (auto _ : state) {
+        std::ranges::sort(vec);
+    }
+}
+
+static void BM_vector_stable_sort(benchmark::State& state,
+std::vector<int>& vec) {
+    for (auto _ : state) {
+        std::ranges::stable_sort(vec);
+    }
+}
+
+BENCHMARK_CAPTURE(BM_vector_sort, vector, rv1)->Iterations(1)-
+>Unit(benchmark::kMillisecond);
+BENCHMARK_CAPTURE(BM_vector_stable_sort, vector, rv2)->Iterations(1)-
+>Unit(benchmark::kMillisecond);
+
+int main(int argc, char** argv) {
+    constexpr uint32_t elements = 100000000;
+    int32_t minval = 1;
+    int32_t maxval = 1000000000;
+
+    rv1 = random_vector(elements, minval, maxval);
+    rv2 = rv1;
+    benchmark::Initialize(&argc, argv);
+    benchmark::RunSpecifiedBenchmarks();
+
+    return 0;
+}
+\end{cpp}
+
+上述代码生成一个随机数向量。在这里，我们运行两个基准测试函数来对向量进行排序： 一个使用 std::sort，另一个使用 std::stable\_sort。请注意，我们使用了同一向量的两个副本，因此两个函数的输入相同。
+
+以下代码行使用了 BENCHMARK\_CAPTURE 宏。此宏允许我们将参数传递给基准测试函数 - 在本例中为 std::vector 的引用（我们通过引用传递以避免复制向量并影响基准测试结果）。
+
+我们将结果指定为以毫秒而不是纳秒为单位：
+
+\begin{cpp}
+BENCHMARK_CAPTURE(BM_vector_sort, vector, rv1)->Iterations(1)-
+>Unit(benchmark::kMillisecond);
+\end{cpp}
+
+基准测试结果如下：
+
+\begin{shell}
+---------------------------------------------------------------------
+Benchmark                       Time             CPU       Iterations
+---------------------------------------------------------------------
+BM_vector_sort               5877 ms         5876 ms                1
+BM_vector_stable_sort.       7172 ms         7171 ms                1
+\end{shell}
+
+结果与我们使用 std::chrono 测量时间得到的结果一致。
+
+对于我们的最后一个 Google Benchmark 示例，我们将创建一个线程 (std::thread)：
+
+\begin{cpp}
+#include <benchmark/benchmark.h>
+
+#include <algorithm>
+#include <chrono>
+#include <iostream>
+#include <random>
+#include <thread>
+
+static void BM_create_terminate_thread(benchmark::State& state) {
+    for (auto _ : state) {
+        std::thread thread([]{ return -1; });
+        thread.join();
+    }
+}
+
+BENCHMARK(BM_create_terminate_thread)->Iterations(2000);
+
+int main(int argc, char** argv) {
+    benchmark::Initialize(&argc, argv);
+    benchmark::RunSpecifiedBenchmarks();
+    return 0;
+}
+\end{cpp}
+
+这个例子很简单： BM\_create\_terminate\_thread 创建一个线程（不执行任何操作，仅返回 0） 并等待它结束（thread.join()）。我们运行 2000 次迭代来估计创建线程所需的时间。
+
+结果如下：
+
+\begin{shell}
+---------------------------------------------------------------
+Benchmark                       Time        CPU      Iterations
+---------------------------------------------------------------
+BM_create_terminate_thread. 32424 ns   21216 ns            2000
+\end{shell}
+
+在本节中，我们学习了如何使用 Google Benchmark 库创建微基准测试来测量某些函数的执行时间。同样，微基准测试只是一种近似值，并且由于被基准测试代码的孤立性质，它们可能会产生误导。请谨慎使用它们。
+
+\mySubsubsection{13.2.3.}{Linux perf 工具}
+
+在我们的代码中使用 std::chrono 或微基准测试库（例如 Google Benchmark）需要访问要分析的代码，并且能够通过添加额外调用来测量代码段的执行时间或运行小片段作为微基准测试函数来修改它。
+
+使用 Linux perf 工具，我们可以分析程序的执行情况，而无需更改其任何代码。
+
+Linux perf 工具是一款功能强大、灵活且广泛使用的 Linux 系统性能分析和分析实用程序。
+它提供了对内核和用户空间级别的系统性能的详细见解。
+
+让我们考虑一下 perf 的主要用途。
+
+首先，我们有 CPU 分析。 perf 工具允许您捕获进程的执行配置文件，测量哪些函数消耗了最多的 CPU 时间。这对于帮助识别代码中 CPU 密集型部分和瓶颈非常有用。
+
+以下命令行将在我们编写的小型 13x07-thread\_contention 程序上运行 perf，该程序用于说明该工具的基础知识。此应用程序的代码可在本书的 GitHub 存储库中找到：
+
+\begin{shell}
+perf record --call-graph dwarf ./13x07-thread_contention
+\end{shell}
+
+-{}-call-graph 选项将函数调用层次结构的数据记录在名为 perf.data 的文件中，而 dwarf 选项指示 perf 使用 dwarf 文件格式来调试符号（以获取函数名称）。
+
+执行完上一个命令后，我们必须运行以下命令：
+
+\begin{shell}
+perf script > out.perf
+\end{shell}
+
+这会将记录的数据（包括调用堆栈）转储到名为 out.perf 的文本文件中。
+
+现在，我们需要将文本文件转换为带有调用图的图片。为此，我们可以运行以下命令：
+
+\begin{shell}
+gprof2dot -f perf out.perf -o callgraph.dot
+\end{shell}
+
+这将生成一个名为 callgraph.dot 的文件，可以使用 Graphviz 进行可视化。
+
+您可能需要安装 gprof2dot。为此，您需要在 PC 上安装 Python。运行以下命令安装 gprof2do t：
+
+\begin{shell}
+pip install gprof2dot
+\end{shell}
+
+也安装 Graphviz。在 Ubuntu 中，你可以这样做：
+
+\begin{shell}
+sudo apt-get install graphviz
+\end{shell}
+
+最后，通过运行以下命令即可生成callgraph.png图片：
+
+\begin{shell}
+dot -Tpng callgraph.dot -o callgraph.png
+\end{shell}
+
+可视化程序调用图的另一种非常常见的方法是使用火焰图。
+
+要生成火焰图，请克隆 FlameGraph 存储库：
+
+\begin{shell}
+git clone https://github.com/brendangregg/FlameGraph.git
+\end{shell}
+
+在 FlameGraph 文件夹中，您将找到生成火焰图的脚本。
+
+运行以下命令：
+
+\begin{shell}
+FlameGraph/stackcollapse-perf.pl out.perf > out.folded
+\end{shell}
+
+此命令将堆栈跟踪折叠为 FlameGraph 工具可以使用的格式。现在，运行以下命令：
+
+\begin{shell}
+Flamegraph/flamegraph.pl out.folded > flamegraph.svg
+\end{shell}
+
+您可以使用网络浏览器来可视化火焰图：
+
+\myGraphic{0.8}{content/part5/chapter13/images/1.png}{图 13.1：火焰图概览}
+
+现在，让我们学习如何收集程序的性能统计数据。
+
+以下命令将显示在执行 13x05-sort\_perf 期间已执行的指令数和使用的 CPU 周期数。每周期指令数是 CPU 在每个时钟周期执行的平均指令数。此指标仅在我们对代码的短部分进行微基准测试或测量时才有用。对于此示例，我们可以看到 CPU 每周期执行一条指令，这是现代 CPU 的平均值。在多线程代码中，由于执行的并行性质，我们可以得到更大的数字，但此指标通常用于测量和优化在单个 CPU 核心中执行的代码。该数字必须解释为我们保持 CP U 的繁忙程度，因为它取决于许多因素，例如内存读取/写入的次数、内存访问模式（线性连续/非线性）、代码中的分支级别等：
+
+\begin{shell}
+perf stat -e instructions,cycles ./13x05-sort_perf
+\end{shell}
+
+运行上述命令后，我们得到以下结果：
+
+\begin{shell}
+Performance counter stats for './13x05-sort_perf':
+    30,993,024,309        instructions      #       1.03 insn per cycle
+    30,197,863,655        cycles
+    6.657835162 seconds time elapsed
+
+    6.502372000 seconds user
+    0.155008000 seconds sys
+\end{shell}
+
+运行以下命令，您可以获取可以使用 perf 分析的所有预定义事件的列表：
+
+\begin{shell}
+perf list
+\end{shell}
+
+我们再做几个吧：
+
+\begin{shell}
+perf stat -e branches ./13x05-sort_perf
+\end{shell}
+
+上述命令测量了已执行的分支指令的数量。我们得到以下结果：
+
+\begin{shell}
+Performance counter stats for './13x05-sort_perf':
+    5,246,138,882      branches
+     6.712285274 seconds time elapsed
+     6.551799000 seconds user
+     0.159970000 seconds sys
+\end{shell}
+
+在这里，我们可以看到，执行的指令中有六分之一是分支指令，这在对大向量进行排序的程序中是预料之中的。
+
+如前所述，测量代码中的分支级别非常重要，尤其是对于较短的代码段（以避免可能影响测量结果的交互）。如果没有分支或分支很少， CPU 将以更快的速度运行指令。分支的主要问题是 CPU 可能需要重建管道，而这可能代价高昂，尤其是当分支位于内部/关键循环中时。
+
+以下命令将报告 L1 缓存数据访问的次数（我们将在下一节中看到 CPU 缓存）：
+
+\begin{shell}
+perf stat -e all_data_cache_accesses ./13x05-sort_perf
+\end{shell}
+
+我们得到以下结果：
+
+\begin{shell}
+Performance counter stats for './13x05-sort_perf':
+    21,286,061,764      all_data_cache_accesses
+
+       6.718844368 seconds time elapsed
+
+       6.561416000 seconds user
+       0.157009000 seconds sys
+\end{shell}
+
+让我们回到锁争用示例并使用 perf 收集一些有用的统计数据。
+
+使用 perf 的另一个好处是 CPU 迁移 - 即线程从一个 CPU 核心移动到另一个 CPU 核心的次数。核心之间的线程迁移可能会降低缓存性能，因为线程在移动到新核心时会失去缓存数据的好处（下一节将详细介绍缓存）。
+
+让我们运行以下命令：
+
+\begin{shell}
+perf stat -e cpu-migrations ./13x07-thread_contention
+\end{shell}
+
+这将导致以下输出：
+
+\begin{shell}
+Performance counter stats for './13x08-thread_contention':
+            45         cpu-migrations
+  50.476706194     seconds time elapsed
+  57.333880000 seconds user
+ 262.123060000 seconds sys
+\end{shell}
+
+让我们看看使用 perf 的另一个优势：上下文切换。它计算执行期间上下文切换的次数（线程被换出并调度另一个线程的次数）。高上下文切换可能表明有太多线程在争夺 CPU 时间，从而导致性能下降。
+
+让我们运行以下命令：
+
+\begin{shell}
+perf stat -e context-switches ./13x07-thread_contention
+\end{shell}
+
+输出结果如下：
+
+\begin{shell}
+Performance counter stats for './13x08-thread_contention':
+     13,867,866     cs
+   47.618283562 seconds time elapsed
+
+   52.931213000 seconds user
+  247.033479000 seconds sys
+\end{shell}
+
+本节就到此结束。这里我们介绍了 Linux perf 工具及其一些应用。下一节我们将研究 CPU 内存缓存和伪共享。
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

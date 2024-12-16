@@ -1,5 +1,366 @@
 
+互斥是并发编程中的一个基本概念，可确保多个线程或进程不会同时访问共享资源（例如共享变量、代码的关键部分或文件或网络连接）。互斥对于防止我们在上一节中看到的竞争条件至关重要。
 
-\mySubsubsection{4.3.1.}{C++ Standard Library mutual exclusion implementation}
+想象一下，一家小咖啡店只有一台浓缩咖啡机。这台机器一次只能制作一杯浓缩咖啡。这意味着这台机器是所有咖啡师必须共享的关键资源。
 
-\mySubsubsection{4.3.2.}{Problems when using locks}
+咖啡店有三位咖啡师：爱丽丝、鲍勃和卡罗尔。他们同时使用咖啡机，但不能同时使用，因为这样可能会产生问题：鲍勃将适量的现磨咖啡放入机器中，开始制作浓缩咖啡。然后，爱丽丝做了同样的事情，但先从机器中取出咖啡，以为鲍勃只是忘了做这件事。然后鲍勃从机器中取出浓缩咖啡，之后，爱丽丝发现没有浓缩咖啡了！这是一场灾难——我们计数器程序的真实版本。
+
+为了解决咖啡店的问题，他们可能会任命 Carol 为机器管理员。在使用机器之前， Alice 和Bob 都会询问她是否可以开始制作新的浓缩咖啡。这样就可以解决问题。
+
+回到我们的计数器程序，如果我们可以一次只允许一个线程访问计数器（Carol 在咖啡店里所做的），我们的软件问题也将得到解决。互斥是一种可用于控制并发线程访问内存的机制。 C++ 标准库提供了 std::mutex 类，这是一个同步原语，用于保护共享数据不被两个或多个线程同时访问。
+
+我们在上一节中看到的这个新版本的代码实现了两种并发增加计数器的方式：如上一节所述的自由访问，以及使用互斥的同步访问：
+
+\begin{cpp}
+#include <iostream>
+#include <mutex>
+#include <thread>
+
+std::mutex mtx;
+int counter = 0;
+
+int main() {
+    auto funcWithoutLocks = [] {
+        for (int i = 0; i < 1000000; ++i) {
+            ++counter;
+        };
+    };
+
+    auto funcWithLocks = [] {
+        for (int i = 0; i < 1000000; ++i) {
+            mtx.lock();
+            ++counter;
+            mtx.unlock();
+        };
+    };
+
+    {
+        counter = 0;
+        std::thread t1(funcWithoutLocks);
+        std::thread t2(funcWithoutLocks);
+
+        t1.join();
+        t2.join();
+
+        std::cout << "Counter without using locks: " << counter <<
+        std::endl;
+    } {
+        counter = 0;
+        std::thread t1(funcWithLocks);
+        std::thread t2(funcWithLocks);
+
+        t1.join();
+        t2.join();
+
+        std::cout << "Counter using locks: " << counter << std::endl;
+    }
+    return 0;
+}
+\end{cpp}
+
+当线程运行 funcWithLocks 时，它会在增加计数器之前使用 mtx.lock() 获取锁。一旦计数器增加，线程就会释放锁（mtx.unlock()）。
+
+该锁只能由一个线程拥有。例如，如果 t1 获取了锁，然后 t2 也尝试获取该锁，则 t2 将被阻止并等待，直到锁可用。由于任何时候都只有一个线程可以拥有该锁，因此此同步原语称为互斥（来自互斥）。如果您运行此程序几次，您将始终得到正确的结果： 2000000。
+
+在本节中，我们介绍了互斥的概念，并了解到 C++ 标准库提供了 std::mutex 类作为线程同步的原语。在下一节中，我们将详细研究 std::mutex。
+
+\mySubsubsection{4.3.1.}{C++标准库互斥实现}
+
+在上一节中，我们介绍了互斥和互斥锁的概念，以及为什么需要它们来同步并发内存访问。在本节中，我们将了解 C++ 标准库提供的用于实现互斥的类。我们还将了解 C++ 标准库提供的一些辅助类，它们使互斥锁的使用更加容易。
+
+下表总结了 C++ 标准库提供的互斥锁类及其主要功能：
+
+% Please add the following required packages to your document preamble:
+% \usepackage{longtable}
+% Note: It may be necessary to compile the document several times to get a multi-page table to line up properly
+\begin{longtable}{|l|l|l|l|}
+\hline
+\textbf{互斥类型}       & \textbf{可访问}                                                    & \textbf{可递归} & \textbf{可超时} \\ \hline
+\endfirsthead
+%
+\endhead
+%
+std::mutex                   & 独占 & NO  & NO  \\ \hline
+std::recursive\_mutex        & 独占 & YES & NO  \\ \hline
+std::shared\_mutex        & \begin{tabular}[c]{@{}l@{}}1 - 独占\\ N - 共享\end{tabular} & NO                 & NO               \\ \hline
+std::timed\_mutex            & 独占 & NO  & YES \\ \hline
+std::recursive\_timed\_mutex & 独占 & YES & YES \\ \hline
+std::shared\_timed\_mutex & \begin{tabular}[c]{@{}l@{}}1 - 独占\\ N - 共享\end{tabular} & NO                 & YES              \\ \hline
+\end{longtable}
+
+\begin{center}
+表 4.2： C++ 标准库中的互斥类
+\end{center}
+
+让我们逐一探索这些类。
+
+\mySamllsection{std::mutex}
+
+std::mutex 类是在 C++11 中引入的，是 C++ 标准库提供的最重要和最常用的同步原语之一。
+
+正如我们在本章前面看到的， std::mutex 是一个同步原语，可用于保护共享数据不被多个线程同时访问。
+std::mutex 类提供独占、非递归所有权语义。
+
+std::mutex 的主要特点如下：
+
+\begin{itemize}
+\item
+调用线程从成功调用 lock() 或 try\_lock() 开始直到调用 unlock() 为止都拥有该互斥锁。
+
+\item
+调用线程在调用 lock() 或 try\_lock() 之前不得拥有互斥锁。这是 std::mutex 的非递归所有权语义属性。
+
+\item
+当一个线程拥有一个互斥锁时，所有其他线程将阻塞（调用 lock() 时）或收到 false 返回值（调用 try\_lock() 时）。这是 std::mutex 的独占所有权语义。
+\end{itemize}
+
+如果拥有互斥锁的线程尝试再次获取它，则结果行为是未定义的。通常，发生这种情况时会引发异常，但这是由实现定义的。
+
+如果线程释放互斥锁后，尝试再次释放它，这也是未定义的行为（如前一种情况）。
+
+当线程锁定互斥锁时，互斥锁被销毁，或者线程在未释放锁的情况下终止，也会导致未定义行为。
+
+std::mutex 类有三种方法：
+
+\begin{itemize}
+\item
+lock()：调用 lock() 获取互斥锁。如果互斥锁已锁定，则调用线程将被阻止，直到互斥锁解锁。从应用程序的角度来看，这就像调用线程等待互斥锁可用一样。
+
+\item
+try\_lock()：调用此函数时，返回 true（表示互斥锁已成功锁定）或 false（表示互斥锁已锁定）。请注意，try\_lock 是非阻塞的，调用线程可以获取互斥锁，也可以不获取，但不会像调用 lock() 时那样被阻塞。try\_lock() 方法通常用于我们不希望线程等待互斥锁可用时。当我们希望线程继续进行某些处理并稍后尝试获取互斥锁时，我们将调用try\_lock()。
+
+\item
+unlock()：调用 unlock() 释放互斥锁。
+\end{itemize}
+
+\mySamllsection{std::recursive\_mutex}
+
+std::mutex 类提供独占、非递归所有权语义。虽然独占所有权语义至少对于线程来说总是必需的（毕竟它是一种互斥机制），但在某些情况下，我们可能需要以递归方式获取互斥锁。例如，递归函数可能需要获取互斥锁。我们可能还需要在从另一个获取相同互斥锁的函数 f() 调用的函数 g() 中获取互斥锁。
+
+std::recursive\_mutex 类提供独占、递归语义。其主要特点如下：
+
+\begin{itemize}
+\item
+调用线程可以多次获取同一个互斥锁。它将拥有该互斥锁，直到它释放该互斥锁的次数与获取该互斥锁的次数相同。例如，如果一个线程递归获取互斥锁三次，它将拥有该互斥锁，直到它第三次释放该互斥锁。
+
+\item
+递归互斥锁可以递归获取的最大次数未指定，因此由实现定义。一旦互斥锁的获取次数达到最大次数，对 lock() 的调用将抛出 std::system\_error，而对 try\_lock() 的调用将返回 false。
+
+\item
+所有权与 std::mutex 相同：如果一个线程拥有一个 std::recursive\_mutex 类，则任何其他线程在尝试通过调用 lock() 来获取它时都将被阻塞，或者在调用 try\_lock() 时将返回 false。
+\end{itemize}
+
+std::recursive\_mutex 接口与 std::mutex 完全相同。
+
+\mySamllsection{std::shared\_mutex}
+
+std::mutex 和 std::shared\_mutex 都具有独占所有权语义，并且任何时候都只能有一个线程成为互斥锁所有者。但在某些情况下，我们可能需要让多个线程同时访问受保护的数据，并只给一个线程独占访问权限。
+计数器示例要求每个线程都拥有对单个变量的独占访问权限，因为它们都在更新计数器值。现在，如果我们有只需要读取计数器中当前值的线程，并且只有一个线程来增加其值，那么让读取线程同时访问计数器并给予写入线程独占访问权限会更好。
+
+此功能是使用所谓的“读者-写者锁”实现的。 C++ 标准库实现了 std::shared\_mutex 类，具有类似（但不完全相同）的功能。
+
+std::shared\_mutex 与其他互斥类型的主要区别在于它有两个访问级别：
+
+\begin{itemize}
+\item
+共享：多个线程可以共享同一互斥锁的所有权。通过调用 lock\_shared()、 try\_lock\_shared ()/unlock\_shared() 来获取/释放共享所有权。当至少一个线程已获取对锁的共享访问权限时，其他任何线程都无法获得对锁的独占访问权限，但它可以获得共享访问权限。
+
+\item
+独占：只有一个线程可以拥有互斥锁。通过调用 lock()、 try\_lock()/unlock() 来获取/释放独占所有权。当一个线程获得对锁的独占访问权限时，其他任何线程都无法获得对锁的共享或独占访问权限。
+\end{itemize}
+
+让我们看一个使用 std::shared\_mutex 的简单例子：
+
+\begin{cpp}
+#include <algorithm>
+#include <chrono>
+#include <iostream>
+#include <shared_mutex>
+#include <thread>
+
+int counter = 0;
+
+int main() {
+    using namespace std::chrono_literals;
+
+    std::shared_mutex mutex;
+
+    auto reader = [&] {
+        for (int i = 0; i < 10; ++i) {
+            mutex.lock_shared();
+            // Read the counter and do something
+            mutex.unlock_shared();
+        }
+    };
+
+    auto writer = [&] {
+        for (int i = 0; i < 10; ++i) {
+            mutex.lock();
+            ++counter;
+            std::cout << "Counter: " << counter << std::endl;
+            mutex.unlock();
+            std::this_thread::sleep_for(10ms);
+        }
+    };
+
+    std::thread t1(reader);
+    std::thread t2(reader);
+    std::thread t3(writer);
+    std::thread t4(reader);
+    std::thread t5(reader);
+    std::thread t6(writer);
+
+    t1.join();
+    t2.join();
+    t3.join();
+    t4.join();
+    t5.join();
+    t6.join();
+
+    return 0;
+}
+\end{cpp}
+
+该示例使用 std::shared\_mutex 同步六个线程：两个线程是写入器，它们增加计数器的值并需要独占访问权限。其余四个线程只读取计数器，仅需要共享访问权限。另外，请注意，为了使用 std::shared\_mutex，我们需要包含 <shared\_mutex> 头文件。
+
+\mySamllsection{定时互斥类型}
+
+到目前为止我们所看到的互斥类型在我们想要获取独占使用的锁时的行为方式是相同的：
+
+\begin{itemize}
+\item
+std::lock()：调用线程阻塞，直到锁可用
+
+\item
+std::try\_lock()：如果锁不可用，则返回 false
+\end{itemize}
+
+对于 std::lock() 来说，调用线程可能会等待很长时间，如果线程无法获取锁，我们可能只需要等待一段时间，然后让线程继续进行一些处理。
+
+为了实现这个目标，我们可以使用 C++ 标准库提供的定时互斥锁： std::timed\_mutex、 std::r ecursive\_timed\_mutex 和 std::shared\_time\_mutex。
+
+它们与非定时对应物类似，并实现以下附加功能以允许等待锁在特定时间段内可用：
+
+\begin{itemize}
+\item
+try\_lock\_for()：尝试锁定互斥锁并阻止线程，直到指定的持续时间结束（超时）。如果互斥锁在指定的持续时间之前被锁定，则返回 true；否则，返回 false。
+
+如果指定的持续时间小于或等于零（timeout\_duration.zero()），则该函数的行为与 try\_lock() 完全相同。
+
+由于调度或争用延迟，此函数的阻塞时间可能会超过指定的持续时间。
+
+\item
+try\_lock\_until()：尝试锁定互斥锁，直到指定的超时时间或互斥锁被锁定（以先到者为准）。在这种情况下，我们指定未来的一个实例作为等待的限制。
+\end{itemize}
+
+下面的示例显示如何使用 std::try\_lock\_for()：
+
+\begin{cpp}
+#include <algorithm>
+#include <chrono>
+#include <iostream>
+#include <mutex>
+#include <thread>
+#include <vector>
+
+constexpr int NUM_THREADS = 8;
+int counter = 0;
+int failed = 0;
+
+int main() {
+    using namespace std::chrono_literals;
+
+    std::timed_mutex tm;
+    std::mutex m;
+
+    auto worker = [&] {
+        for (int i = 0; i < 10; ++i) {
+            if (tm.try_lock_for(10ms)) {
+                ++counter;
+                std::cout << "Counter: " << counter << std::endl;
+                std::this_thread::sleep_for(10ms);
+                m.unlock();
+            }
+            else {
+                m.lock();
+                ++failed;
+                std::cout << "Thread " << std::this_thread::get_id()
+                << " failed to lock" << std::endl;
+                m.unlock();
+            }
+            std::this_thread::sleep_for(12ms);
+        }
+    };
+
+    std::vector<std::thread> threads;
+    for (int i = 0; i < NUM_THREADS; ++i) {
+        threads.emplace_back(worker);
+    }
+
+    for (auto& t : threads) {
+        t.join();
+    }
+
+    std::cout << "Counter: " << counter << std::endl;
+    std::cout << "Failed: " << failed << std::endl;
+
+    return 0;
+}
+\end{cpp}
+
+上述代码使用了两个锁： tm（定时互斥锁），用于在获取 tm 成功时同步对 counter 的访问和写入屏幕； m（非定时互斥锁），用于在获取 tm 不成功时同步对 failed 的访问和写入屏幕。
+
+\mySubsubsection{4.3.2.}{使用锁时会遇到的问题}
+
+我们已经看到了仅使用互斥锁（锁）的示例。如果我们只需要一个互斥锁，并且我们正确地获取和释放它，那么编写正确的多线程代码通常并不困难。一旦我们需要多个锁，代码复杂性就会增加。使用多个锁时的两个常见问题是死锁和活锁。
+
+\mySamllsection{死锁}
+
+让我们考虑以下场景：为了执行某项任务，一个线程需要访问两个资源，并且它们不能被两个或多个线程同时访问（我们需要互斥来正确同步对所需资源的访问）。每个资源都与不同的 std::mutex 类同步。在这种情况下，线程必须获取第一个资源互斥锁，然后获取第二个资源互斥锁，最后处理资源并释放两个互斥锁。
+
+当两个线程尝试执行上述处理时，可能会发生如下情况： 线程 1 和线程 2 需要获取两个互斥锁才能执行所需的处理。线程 1 获取第一个互斥锁，线程 2 获取第二个互斥锁。然后，线程 1 将永远被阻塞，等待第二个互斥锁可用，而线程 2 将永远被阻塞，等待第一个互斥锁可用。这被称为死锁，因为两个线程都将永远被阻塞，等待对方释放所需的互斥锁。
+
+这是多线程代码中最常见的问题之一。在第 11 章“调试”中，我们将学习如何通过使用调试器检查正在运行的（死锁）程序来发现此问题。
+
+\mySamllsection{活锁}
+
+解决死锁的一个可能方法如下：当一个线程尝试获取锁时，它只会阻塞一段有限的时间，如果仍然不成功，它将释放它可能已获取的任何锁。
+
+例如，线程 1 获取了第一个锁，线程 2 获取了第二个锁。经过一段时间后，线程 1 仍未获取第二个锁，因此它释放了第一个锁。线程 2 也可能完成等待并释放它获取的锁（在此示例中为第二个锁）。
+
+这种解决方案有时可能有效，但并不正确。想象一下这种情况：线程 1 已获取第一个锁，并获取了第二个锁。一段时间后，两个线程都释放了它们已经获取的锁，然后它们再次获取相同的锁。然后，线程释放锁，然后再次获取锁，依此类推。
+
+线程无法做任何事情，只能获取锁、等待、释放锁，然后重复上述操作。这种情况称为活锁，因为线程不会永远等待（如死锁情况），而是处于某种活动状态，并不断获取和释放锁。
+
+解决死锁和活锁问题的最常见方法是以一致的顺序获取锁。例如，如果一个线程需要获取两个锁，它将始终先获取第一个锁，然后再获取第二个锁。锁将以相反的顺序释放（先释放第二个锁，然后释放第一个锁）。如果第二个线程尝试获取第一个锁，它将不得不等到第一个线程释放两个锁，这样就永远不会发生死锁。
+
+在本节中，我们了解了 C++ 标准库提供的互斥锁类。我们研究了它们的主要功能以及使用多个锁时可能遇到的问题。在下一节中，我们将了解 C++ 标准库提供的机制，以使获取和释放互斥锁更加容易。
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

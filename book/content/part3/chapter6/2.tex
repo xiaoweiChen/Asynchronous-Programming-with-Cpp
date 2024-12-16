@@ -1,7 +1,444 @@
-\mySubsubsection{6.2.1.}{Promises}
 
-\mySubsubsection{6.2.2.}{Futures}
+Future 是一个对象，表示一些未确定的结果，这些结果将在未来某个时间完成。 Promise 是该结果的提供者。
 
-\mySubsubsection{6.2.3.}{Shared futures}
+自版本 C++11 以来，承诺和未来一直是 C++ 标准的一部分，可以通过包含 <future> 头文件、通过类 std::promise 获得承诺以及通过类 std::future 获得未来来实现。
 
-\mySubsubsection{6.2.4.}{Packaged tasks}
+std::promise 和 std::future 对实现了一次性生产者-消费者通道，其中 Promise 为生产者， Future 为消费者。消费者 (std::future) 可以阻塞，直到生产者 (std::promise) 的结果可用为止。
+
+\myGraphic{0.8}{content/part3/chapter6/images/1.png}{图 6.1 – Promise-future 沟通渠道}
+
+许多现代编程语言都提供了类似的异步方法，例如 Python（带有 asyncio 库）、 Scala（在 sc ala.concurrent 库中）、 JavaScript（在其核心库中）、 Rust（在其标准库 (std) 或诸如 prospector\_future 之类的包中）、 Swift（在 Combine 框架中）和 Kotlin 等。
+
+使用 Promise 和 Future 实现异步执行的基本原理是，我们想要运行以生成结果的函数在后台执行，使用新线程或当前线程，初始线程使用 Future 对象来检索函数计算的结果。函数完成时将存储此结果值，因此同时将使用 Future 对象作为占位符。异步函数将使用 Promise 对象将结果存储在 Future 中，而无需在初始线程和后台线程之间建立显式同步机制。当初始线程需要该值时，将从 Future 对象中检索该值。如果该值仍未准备好，则初始线程执行将被阻止，直到 Future 准备好为止。
+
+有了这个思路，让一个函数异步运行就变得很简单了。我们只需要知道这个函数可以在一个单独的线程上运行，所以我们需要避免数据竞争，但线程之间的结果通信和同步是由 pro mise-future 对管理的。
+
+使用承诺和未来可以通过卸载计算来提高响应能力，并提供一种与线程和回调相比处理异步操作的结构化方法，我们将在本章中进行探讨。
+
+现在让我们了解这两个对象。
+
+\mySubsubsection{6.2.1.}{Promise}
+
+Promise在 <future> 标头中定义为 std::promise。
+
+通过承诺，我们达成了一项协议，即结果将在未来的某个时间可用。这样，我们就可以让后台任务完成其工作并计算结果。同时，主线程也将继续执行其任务，并在需要结果时请求它。那时，结果可能已经准备好了。
+
+此外，承诺可以传达是否引发异常而不是返回有效值，并且它们将确保其生命周期持续到线程完成并将结果写入其中。
+
+因此， promise 是一种存储结果（值或异常）的工具，稍后可通过 Future 异步获取结果。 pro mise 对象仅供使用一次，之后无法修改。
+
+除了结果之外，每个 Promise 还拥有一个共享状态。共享状态是一个存储完成状态、同步机制和指向结果的指针的内存区域。它通过允许 Promise 存储结果或异常、在完成时发出信号以及允许 Future 访问结果（如果 Promise 尚未准备好则阻塞）来确保 Promise 和 Future 之间的正确通信和同步。 Promise 可以使用以下操作更新其共享状态：
+
+\begin{itemize}
+\item
+准备就绪： Promise 将结果存储在共享状态中，并使 Promise 的状态变为就绪状态，从而解除任何等待与 Promise 关联的 Future 的线程的阻塞。请记住，结果可以是值（甚至是 void）或异常。
+
+\item
+释放： promise 释放对共享状态的引用，如果这是最后一个引用，则该引用将被销毁。
+此内存释放机制类似于共享指针及其控制块所使用的机制。除非共享状态由 std::async 创建且尚未处于就绪状态（我们将在下一章中学习这一点），否则此操作不会阻塞。
+
+\item
+放弃： promise 中存储了一个类型为 std::future\_error 的异常，错误代码为 std::future\_errc ::broken\_promise，使共享状态处于准备状态，然后释放它。
+\end{itemize}
+
+可以使用其默认构造函数或自定义分配器来构造 std::promise 对象。在这两种情况下，都会创建一个具有空共享状态的新promise。还可以使用移动构造函数来构造promise；因此，新promise将具有另一个承诺拥有的共享状态。初始promise将保持没有共享状态。
+
+移动 Promise 在与资源管理、通过避免额外副本进行优化以及保持正确的所有权语义相关的场景中很有用；例如，当 Promise 需要在另一个线程中完成、存储在容器中、返回给 API 调用的调用者或发送到回调处理程序时，它很有用。
+
+承诺无法被复制（其复制构造函数或复制赋值运算符被删除），避免两个承诺对象共享相同的共享状态，并在结果存储在共享状态时存在数据竞争的风险。
+
+承诺可以移动，同样也可以交换。标准模板库 (STL) 中的 std::swap 函数具有针对承诺的模板特化。
+
+当一个promise对象被删除时，关联的future仍将有权访问共享状态。 如果在promise设置值之后发生删除，则共享状态将处于释放模式，因此未来可以访问结果并使用它。 但是，如果在设置结果值之前删除了承诺，则共享状态将移至放弃状态，并且未来在尝试获取结果时将获得 std::future\_errc::broken\_promise。
+
+可以使用 std::promise 函数 set\_value() 设置值，使用 set\_exception() 函数设置异常。结果以原子方式存储在promise的共享状态中，使其状态准备就绪。让我们看一个例子：
+
+\begin{cpp}
+auto threadFunc = [](std::promise<int> prom) {
+    try {
+        int result = func();
+        prom.set_value(result);
+    } catch (...) {
+        prom.set_exception(std::current_exception());
+    }
+};
+
+std::promise<int> prom;
+std::jthread t(threadFunc, std::move(prom));
+\end{cpp}
+
+在上面的例子中， 创建prom 并作为参数移入 threadFunc lambda 函数中。由于promise是不可复制的，我们需要使用按值传递并将承诺移入参数以避免复制。
+
+在 lambda 函数内部，调用 func() 函数，并使用 set\_value() 将其结果存储在 promise 中。如果 func() 抛出异常，则会使用 set\_exception() 捕获该异常并将其存储在 promise 中。我们稍后会了解到，可以使用 Future 在调用线程中提取此结果（值或异常）。
+
+在 C++14 中，我们还可以使用广义 lambda 捕获将 promise 传递到 lambda 捕获中：
+
+\begin{cpp}
+using namespace std::literals;
+std::promise<std::string> prom;
+auto t = std::jthread([prm = std::move(prom)] mutable {
+    std::this_thread::sleep_for(100ms);
+    prm.set_value("Value successfully set");
+});
+\end{cpp}
+
+因此， prm = std::move(prom) 将外部承诺 prom 移至 lambda 的内部承诺 prm。默认情况下，参数被捕获为常量，因此我们需要将 lambda 指定为可变的，以允许 prm 被修改。
+
+如果承诺没有共享状态（错误代码设置为 no\_state）或者共享状态已经有存储的结果（错误代码设置为 promise\_already\_satisfied），则 set\_value() 会抛出 std::future\_error 异常。
+
+set\_value() 也可以在不指定值的情况下使用。在这种情况下，它只是使状态准备就绪。这可以用作屏障，正如我们将在本章后面介绍 Future 后看到的那样。
+
+图 6.2 显示了表示不同共享状态转换的图表。
+
+\myGraphic{0.8}{content/part3/chapter6/images/2.png}{图 6.2 – Promise 共享状态转换图}
+
+还有两个函数可以设置 Promise 的值，即 set\_value\_at\_thread\_exit 和 set\_exception\_at\_thread\_exit。与以前一样，结果会立即存储，但使用这些新函数时，状态尚未准备就绪。当线程退出且所有线程局部变量均已销毁时，状态将变为就绪状态。当我们希望线程管理在退出前需要清理的资源（即使发生异常）时，或者当我们希望提供准确的日志活动或监控线程退出时，此功能非常有用。
+
+在抛出异常或避免数据竞争的同步机制方面，这两个函数的行为都与 set\_value() 和 set\_exception() 相同。
+
+现在我们知道了如何将结果存储在承诺中，让我们来了解这个组合的另一个成员，即Future。
+
+\mySubsubsection{6.2.2.}{Future}
+
+<future> 头文件中定义了 std::future。
+
+正如我们之前看到的， Future 是通信渠道的消费者端。它提供对 Promise 存储的结果的访问。
+
+必须通过调用 get\_future() 从 std::promise 对象创建 std::future 对象，或者通过 std::packaged\_task 对象（本章后面有更多详细信息）或调用 std::async 函数（在第 7 章中）：
+
+\begin{cpp}
+std::promise<int> prom;
+std::future<int> fut = prom.get_future();
+\end{cpp}
+
+与Promise一样，出于同样的原因， Future 可以移动但不能复制。要从多个 Future 引用相同的共享状态，我们需要使用共享 Future（将在下一节“共享 Future”中解释）。
+
+get() 方法可用于检索结果。如果共享状态仍未就绪，此调用将通过内部调用 wait() 进行阻塞。当共享状态就绪时，将返回结果值。如果共享状态中存储了异常，则将重新抛出该异常：
+
+\begin{cpp}
+try {
+    int result = fut.get();
+    std::cout << "Result from thread: " << result << '\n';
+} catch (const std::exception& e) {
+    std::cerr << "Exception: " << e.what() << '\n';
+}
+\end{cpp}
+
+在上面的例子中，使用 get() 函数从 fut future 中检索结果。如果结果是一个值，它将以 "Result from thread" 开头的一行打印出来。另一方面，如果抛出异常并将其存储在 promise 中，它将在调用者线程中被重新抛出并捕获，并打印出以 Exception 开头的一行。
+
+调用 get() 方法后， valid() 将返回 false。如果出于某种原因在 valid() 为 false 时调用 get()，则行为未定义，但 C++ 标准建议抛出 std::future\_error 异常，错误代码为 std::future\_errc::no\_state。 valid() 函数返回 false 的 Future 仍可移动。
+
+当 Future 被销毁时，它会释放其共享状态引用。如果这是最后一个引用，则共享状态将被销毁。除非在使用 std::async 的特定情况下，否则这些操作不会阻塞，我们将在第 7 章中学习。
+
+\mySamllsection{Future错误和错误代码}
+
+正如我们在前面的例子中所看到的，一些处理异步执行和共享状态的函数可能会抛出 std::future\_error 异常。
+
+此异常类继承自 std::logic\_error，而后者又继承自 std::exception，分别在 <stdexcept> 和 <exception> 头文件中定义。
+
+与 STL 中定义的任何其他异常一样，可以使用其 code() 检查错误代码函数或通过使用其 what() 函数的解释字符串。
+
+Future 报告的错误代码由 std::future\_errorc（一个范围枚举（枚举类））定义。 C++ 标准定义了以下错误代码，但实现可能会定义其他错误代码：
+
+\begin{itemize}
+\item
+broken\_promise：在设置结果之前删除承诺时报告，因此共享状态在生效之前被释放。
+
+\item
+future\_already\_retrieved：当 std::promise::get\_future() 被调用多次时发生。
+
+\item
+promise\_already\_satisfied：如果共享状态已经有存储的结果，则由 std::promise:: set\_value() 报告。
+
+\item
+no\_state：当使用某些方法但没有共享状态时报告，因为承诺是使用默认构造函数创建的或从中移动的。正如我们将在本章后面看到的那样，当调用某些打包任务 (std::packaged\_task) 方法（例如 get\_future()、 make\_ready\_at\_thread\_exit() 或 reset()）时，当它们的共享状态尚未创建时，或者当使用 std::future::get() 和尚未准备好的未来时（std::future::valid() 返回 false），就会发生这种情况。
+\end{itemize}
+
+\mySamllsection{等待结果}
+
+std::future 还提供了用于阻塞线程并等待结果可用的函数。这些函数是 wait()、 wait\_for() 和wait\_until()。 wait() 函数将无限期阻塞，直到结果准备好为止， wait\_for() 阻塞一段时间， wait\_until() 阻塞直到达到特定时间为止。在等待期内，一旦结果可用，所有函数都将立即返回。
+
+仅当 valid() 为真时才必须调用这些函数。否则，行为未定义，但 C++ 标准鼓励抛出带有 std::future\_errc::no\_state 错误代码的 std::future\_error 异常。
+
+如前所述，使用 std::promise::set\_value() 而不指定值会将共享状态设置为就绪状态。它与 std::future::wait() 一起可用于实现屏障并阻止线程继续运行，直到收到信号为止。以下示例展示了此机制的实际作用。
+
+让我们首先添加所需的头文件：
+
+\begin{cpp}
+#include <algorithm>
+#include <cctype>
+#include <chrono>
+#include <future>
+#include <iostream>
+#include <iterator>
+#include <sstream>
+#include <thread>
+#include <vector>
+#include <set>
+using namespace std::chrono_literals;
+\end{cpp}
+
+在 main() 函数中，程序将首先创建两个承诺， numbers\_promise 和 letters\_promise，以及它们对应的未来， numbers\_ready 和 letters\_ready：
+
+\begin{cpp}
+std::promise<void> numbers_promise, letters_promise;
+auto numbers_ready = numbers_promise.get_future();
+auto letter_ready = letters_promise.get_future();
+\end{cpp}
+
+然后， input\_data\_thread 模拟两个按顺序运行的 I/O 线程操作，一个将数字复制到向量中，另一个将字母插入集合中：
+
+\begin{cpp}
+std::istringstream iss_numbers{"10 5 2 6 4 1 3 9 7 8"};
+std::istringstream iss_letters{"A b 53 C,d 83D 4B ca"};
+std::vector<int> numbers;
+std::set<char> letters;
+
+std::jthread input_data_thread([&] {
+    // Step 1: Emulating I/O operations.
+    std::copy(std::istream_iterator<int>{iss_numbers},
+              std::istream_iterator<int>{},
+              std::back_inserter(numbers));
+
+    // Notify completion of Step 1.
+    numbers_promise.set_value();
+
+    // Step 2: Emulating further I/O operations.
+    std::copy_if(std::istreambuf_iterator<char>
+                    {iss_letters},
+                 std::istreambuf_iterator<char>{},
+                 std::inserter(letters,
+                               letters.end()),
+                               ::isalpha);
+
+    // Notify completion of Step 2.
+    letters_promise.set_value();
+});
+// Wait for numbers vector to be filled.
+numbers_ready.wait();
+\end{cpp}
+
+在此过程中，主线程使用 numbers\_ready.wait() 停止执行，等待对应承诺 numbers\_promise 准备就绪。读取所有数字后， input\_data\_thread 将调用 numbers\_promise.set\_value()，唤醒主线程并继续执行。
+
+如果尚未读取字母，则使用 letters\_ready 未来的 wait\_for() 函数对数字进行排序并打印，并检查它是否超时：
+
+\begin{cpp}
+std::sort(numbers.begin(), numbers.end());
+if (letter_ready.wait_for(1s) == std::future_status::timeout) {
+    for (int num : numbers) std::cout << num << ' ';
+    numbers.clear();
+}
+// Wait for letters vector to be filled.
+letter_ready.wait();
+\end{cpp}
+
+这部分代码展示了主线程如何执行一些工作。与此同时， input\_data\_thread 继续处理传入的数据。然后，主线程将通过调用 letters\_ready.wait() 再次等待。
+
+最后，当所有字母都添加到集合中时，主线程将通过使用 letters\_promise.set\_value() 再次发出信号来唤醒，并且数字（如果尚未打印）和字母将按顺序打印：
+
+\begin{cpp}
+for (int num : numbers) std::cout << num << ' ';
+std::cout << std::endl;
+for (char let : letters) std::cout << let << ' ';
+std::cout << std::endl;
+\end{cpp}
+
+正如我们在前面的例子中看到的，等待函数返回一个未来状态对象。接下来，让我们了解一下这些对象是什么。
+
+\mySamllsection{Future状态}
+
+wait\_for() 和 wait\_until() 返回一个 std::future\_status 对象。
+
+未来可以处于以下任一状态：
+
+\begin{itemize}
+\item
+就绪：共享状态已就绪，表明可以检索结果。
+
+\item
+延迟：共享状态包含延迟函数，这意味着只有在明确请求时才会计算结果。我们将在下一章介绍 std::async 时了解有关延迟函数的更多信息。
+
+\item
+超时：共享状态准备就绪之前已过了指定的超时时间。
+\end{itemize}
+
+接下来，我们将学习如何使用共享 Future 在多个 Future 之间共享一个 Promise 结果。
+
+\mySubsubsection{6.2.3.}{共享Future}
+
+正如我们之前看到的， std::future 只能移动，因此只有一个 Future 对象可以引用特定的异步结果。另一方面， std::shared\_future 是可复制的，因此多个共享 Future 对象可以引用相同的共享状态。
+
+因此， std::shared\_future 允许从不同线程对同一共享状态进行线程安全访问。共享 Future 可用于在多个消费者或相关方之间共享计算密集型任务的结果，从而减少冗余计算。此外，它们还可用于通知事件或用作同步机制，其中多个线程必须等待单个任务的完成。在本章后面，我们将学习如何使用共享 Future 链接异步操作。
+
+std:;shared\_object 的接口与 std::future 的接口相同，因此有关等待和 getter 函数的所有解释都适用于此。
+
+可以通过使用 std::future::share()创建共享对象:
+
+\begin{cpp}
+std::shared_future<int> shared_fut = fut.share();
+\end{cpp}
+
+这会使原来的未来无效（其valid（）函数将返回false）。
+
+下面的示例展示了如何同时将相同的结果发送给多个线程：
+
+\begin{cpp}
+#define sync_cout std::osyncstream(std::cout)
+
+int main() {
+    std::promise<int> prom;
+    std::future<int> fut = prom.get_future();
+    std::shared_future<int> shared_fut = fut.share();
+    std::vector<std::jthread> threads;
+    for (int i = 1; i <= 5; ++i) {
+        threads.emplace_back([shared_fut, i]() {
+            sync_cout << "Thread " << i << ": Result = "
+            << shared_fut.get() << std::endl;
+        });
+    }
+    prom.set_value(5);
+    return 0;
+}
+\end{cpp}
+
+我们首先创建一个承诺 prom，从中获取未来 fut，最后通过调用 share() 获取共享未来 shared\_fut。
+
+然后，创建五个线程并将其添加到一个向量中，每个线程都有一个共享的未来实例和一个索引。所有这些线程都将通过调用 shared\_future.get() 等待承诺 prom 准备就绪。当在承诺共享状态中设置一个值时，所有线程都可以访问该值。运行上面的程序的输出如下：
+
+\begin{shell}
+Thread 5: Result = 5
+Thread 3: Result = 5
+Thread 4: Result = 5
+Thread 2: Result = 5
+Thread 1: Result = 5
+\end{shell}
+
+因此，共享未来也可用于同时向多个线程发出信号。
+
+\mySubsubsection{6.2.4.}{打包任务}
+
+打包任务或 std::packaged\_task 也在 <future> 头文件中定义，它是一个类模板，用于包装要异步调用的可调用对象。其结果存储在共享状态中，可通过 std::future 对象访问。要创建 st d::packaged\_task 对象，我们需要将表示将要调用的任务的函数签名定义为模板参数，并将所需函数作为其构造函数参数传递。以下是一些示例：
+
+\begin{cpp}
+// Using a thread.
+std::packaged_task<int(int, int)> task1(
+                       std::pow<int, int>);
+std::jthread t(std::move(task1), 2, 10);
+
+// Using a lambda function.
+std::packaged_task<int(int, int)> task2([](int a, int b)
+{
+    return std::pow(a, b);
+});
+task2(2, 10);
+
+// Binding to a function.
+std::packaged_task<int()> task3(std::bind(std::pow<int, int>, 2, 10));
+task3();
+\end{cpp}
+
+上面的例子中， task1 是使用函数创建的，并使用线程执行的。另一方面， task2 是使用 lambda 函数创建的，并通过调用其方法 operator() 来执行。最后， task3 是使用 std::bind 的转发调用包装器创建的。
+
+要获取与任务相关的future，只需从其packaged\_task对象中调用get\_future()：
+
+\begin{cpp}
+std::future<int> result = task1.get_future();
+\end{cpp}
+
+与 Promise 和 Future 一样，可以使用默认构造函数、移动构造函数或分配器构建没有共享状态的打包任务。因此，打包任务只能移动且不可复制。此外，赋值运算符和 swap 函数的行为与 Promise 和 Future 类似。
+
+打包任务的析构函数的行为类似于承诺的析构函数；如果共享状态在有效之前被释放，则会抛出 std::future\_error 异常，错误代码为 std::future\_errc::broken\_promise。与 Future 一样，打包任务定义了一个 valid() 函数，如果 std::packaged\_task 对象具有共享状态，则该函数返回 true。
+
+与承诺一样， get\_future() 只能调用一次。如果多次调用此函数，则会抛出带有 future\_already\_retrieved 代码的 std::future\_error 异常。如果打包任务是从默认构造函数创建的，因此没有共享状态，则错误代码将为 no\_state。
+
+如前面的例子所示，可以使用 operator() 来调用存储的可调用对象：
+
+\begin{cpp}
+task1(2, 10);
+\end{cpp}
+
+有时，仅当运行打包任务的线程退出并且其所有线程本地对象都被销毁时，才使结果准备就绪是很有趣的。这可以通过使用 make\_ready\_at\_thread\_exit() 函数来实现。即使结果在线程退出之前尚未准备好，也会像往常一样立即计算结果。因此，其计算不会被推迟。
+
+作为示例，我们定义以下函数：
+
+\begin{cpp}
+void task_func(std::future<void>& output) {
+    std::packaged_task<void(bool&)> task{[](bool& done){
+            done = true;
+    }};
+    auto result = task.get_future();
+    bool done = false;
+    task.make_ready_at_thread_exit(done);
+
+    std::cout << "task_func: done = "
+              << std::boolalpha << done << std::endl;
+
+    auto status = result.wait_for(0s);
+    if (status == std::future_status::timeout)
+        std::cout << "task_func: result not ready\n";
+
+    output = std::move(result);
+}
+\end{cpp}
+
+此函数创建一个名为 task 的打包任务，将其布尔参数设置为 true。还从此任务创建一个名为result 的未来。当通过调用 make\_ready\_at\_thread\_exit() 执行任务时，其 done 参数设置为 true，但未来结果仍未标记为就绪。当 task\_func 函数退出时，结果未来将移动到传递的引用。此时，线程退出，结果未来将设置为就绪。
+
+因此，假设我们使用以下代码从主线程调用此任务：
+
+\begin{cpp}
+std::future<void> result;
+
+std::thread t{task_func, std::ref(result)};
+t.join();
+
+auto status = result.wait_for(0s);
+if (status == std::future_status::ready)
+    std::cout << «main: result ready\n»;
+\end{cpp}
+
+该程序将显示以下输出：
+
+\begin{shell}
+task_func: done = true
+task_func: result not ready
+main: result ready
+\end{shell}
+
+如果没有共享状态（no\_state 错误代码）或者任务已经被调用（promise\_already\_satisfied 错误代码）， make\_ready\_at\_thread\_exit() 将抛出 std::future\_error 异常。
+
+打包的任务状态也可以通过调用 reset() 来重置。该函数将放弃当前状态并构造一个新的共享状态。显然，如果在调用 reset() 时没有状态，则会抛出 no\_state 错误代码的异常。重置后，必须通过调用 get\_future() 获取新的 Future。
+
+以下示例打印前 10 个 2 的幂数。每个数字都是通过调用相同的 packaged\_task 对象计算得出的。在每次循环迭代中， packaged\_task 都会重置，并检索一个新的 Future 对象：
+
+\begin{cpp}
+std::packaged_task<int(int, int)> task([](int a, int b){
+    return std::pow(a, b);
+});
+
+for (int i=1; i<=10; ++i) {
+    std::future<int> result = task.get_future();
+    task(2, i);
+    std::cout << "2^" << i << " = "
+              << result.get() << std::endl;
+    task.reset();
+}
+\end{cpp}
+
+这是执行上述代码时的输出：
+
+\begin{shell}
+2^1 = 2
+2^2 = 4
+2^3 = 8
+2^4 = 16
+2^5 = 32
+2^6 = 64
+2^7 = 128
+2^8 = 256
+2^9 = 512
+2^10 = 1024
+\end{shell}
+
+我们将在下一章中了解到， std::async 提供了一种更简单的方法来实现相同的结果。 std::packaged\_task 的唯一优势是能够准确指定任务将在哪个线程中运行。
+
+现在我们知道了如何使用promise、future和打包任务，现在是时候了解这种方法的优点以及可能出现的缺点了。

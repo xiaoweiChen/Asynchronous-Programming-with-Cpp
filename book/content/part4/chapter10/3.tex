@@ -1,11 +1,11 @@
 
-如第 8 章所述，生成器协程是专门设计用于增量产生值的协程。产生每个值后，协程会自行挂起，直到调用者请求下一个值。在 Boost.Cobalt 中，生成器的工作方式相同。它们是唯一可以产生值的协程类型。当你需要协程随时间产生多个值时，生成器就必不可少了。
+如第 8 章所述，生成器协程是专门设计用于增量产生值的协程。产生每个值后，协程会自行挂起，直到调用者请求下一个值。在 Boost.Cobalt 中，生成器的工作方式相同，是唯一可以产生值的协程类型。当需要协程随时间产生多个值时，生成器就必不可少了。
 
-Boost.Cobalt 生成器的一个关键特性是它们默认是即时执行的，这意味着它们在被调用后立即开始执行。此外，这些生成器是异步的，允许它们使用 co\_await，这与 C++23 中引入的 std::generator 有一个重要区别，后者是惰性执行的，不支持 co\_await。
+Boost.Cobalt 生成器的一个关键特性是默认即时执行，所以在调用后立即开始执行。此外，这些生成器为异步，允许使用 co\_await，这与 C++23 中引入的 std::generator 有一个重要区别，后者是惰性执行的，不支持 co\_await。
 
-\mySubsubsection{10.3.1.}{看一个基本的例子}
+\mySubsubsection{10.3.1.}{一个基本的例子}
 
-让我们从最简单的 Boost.Cobalt 程序开始。此示例不是生成器，但我们将借助它解释一些重要细节：
+从最简单的 Boost.Cobalt 程序开始。此示例不是生成器，但将借助其解释一些重要细节：
 
 \begin{cpp}
 #include <iostream>
@@ -18,14 +18,14 @@ boost::cobalt::main co_main(int argc, char* argv[]) {
 }
 \end{cpp}
 
-在上面的代码中，我们观察到以下情况：
+上面的代码中，可观察到以下情况：
 
 \begin{itemize}
 \item
 要使用 Boost.Cobalt，必须包含 <boost/cobalt.hpp> 头文件。
 
 \item
-您还必须将 Boost.Cobalt 库链接到您的应用程序。我们提供了一个 CMakeLists.txt 文件来执行此操作，不仅针对 Boost.Cobalt，还针对所有必需的 Boost 库。要明确链接 Boost.Cobalt（即并非所有必需的 Boost 库），只需将以下行添加到您的 CMakeLists.txt 文件：
+还必须将 Boost.Cobalt 库链接到应用程序。这里提供了一个 CMakeLists.txt 文件来执行此操作，不仅针对 Boost.Cobalt，还针对所有必需的 Boost 库。要明确链接 Boost.Cobalt（即并非所有必需的 Boost 库），只需将以下行添加到您的 CMakeLists.txt 文件：
 
 \begin{cmake}
 target_link_libraries(${EXEC_NAME} Boost::cobalt)
@@ -36,11 +36,11 @@ target_link_libraries(${EXEC_NAME} Boost::cobalt)
 
 使用 co\_main 可以将程序的主函数（入口点）实现为协程，从而能够调用 co\_await 和co\_return。请记住第 8 章中的内容，主函数不能是协程。
 
-如果您无法更改当前的主函数，则可以使用 Boost.Cobalt。您只需从 main 调用一个函数，该函数将成为使用 Boost.Cobalt 的异步代码的顶级函数。事实上，这就是 Boost.
+如果无法更改当前的主函数，则可以使用 Boost.Cobalt。只需从 main 调用一个函数，该函数将成为使用 Boost.Cobalt 的异步代码的顶层函数。
 
-Cobalt 正在做的事情：它实现了一个 main 函数，它是程序的入口点，并且该（对您隐藏的） main 函数调用 co\_main。
+Cobalt 正在做的事情：实现了一个 main 函数，是程序的入口点，并且该（对您隐藏的） main 函数调用 co\_main。
 
-使用你自己的主函数的最简单方法是这样的：
+使用自己的主函数的最简单方法：
 
 \begin{cpp}
 cobalt::task<int> async_task() {
@@ -48,6 +48,7 @@ cobalt::task<int> async_task() {
     // …
     return 0;
 }
+
 int main() {
     // main function code
     // …
@@ -56,11 +57,11 @@ int main() {
 \end{cpp}
 \end{itemize}
 
-该示例只是打印了一条问候消息，然后调用 co\_await 返回 0。在所有后续示例中，我们将遵循此模式：包括 <boost/cobalt.hpp> 头文件并使用 co\_main 而不是 main。
+该示例只是输出了一条问候消息，然后调用 co\_await 返回 0。在所有后续示例中，将遵循此模式：包括 <boost/cobalt.hpp> 头文件并使用 co\_main 而不是 main。
 
 \mySubsubsection{10.3.2.}{Boost.Cobalt 简单生成器}
 
-利用我们前面的基本示例所掌握的知识，我们将实现一个非常简单的生成器协程：
+利用前面的基本示例所掌握的知识，可实现一个非常简单的生成器协程：
 
 \begin{cpp}
 #include <chrono>
@@ -88,7 +89,7 @@ cobalt::main co_main(int argc, char* argv[]) {
 }
 \end{cpp}
 
-上面的代码展示了一个简单的生成器，它产生一个整数值（使用 co\_yield）并返回另一个整数值（使用 co\_return）。
+上面的代码展示了一个简单的生成器，产生一个整数值（使用 co\_yield）并返回另一个整数值（使用 co\_return）。
 
 cobalt::generator 是一个结构模板：
 
@@ -107,9 +108,9 @@ Yield：生成的对象类型
 Push：输入参数类型（默认为void）
 \end{itemize}
 
-co\_main 函数在使用 co\_await（调用者等待值可用）获取这两个数字后，会打印这两个数字。我们引入了一些延迟来模拟生成器生成数字必须进行的处理。
+co\_main 函数在使用 co\_await（调用者等待值可用）获取这两个数字后，会输出这两个数字。我们引入了一些延迟来模拟生成器生成数字必须进行的处理。
 
-我们的第二个生成器将产生一个整数的平方：
+第二个生成器将产生一个整数的平方：
 
 \begin{cpp}
 #include <chrono>
@@ -140,7 +141,7 @@ cobalt::main co_main(int argc, char* argv[]){
 }
 \end{cpp}
 
-在此示例中， square\_generator 得出 x 参数的平方。这显示了我们如何将值推送到 Boost.Cob alt 生成器。在 Boost.Cobalt 中，将值推送到生成器意味着传递参数（在上例中，传递的参数是整数）。
+square\_generator 得出 x 参数的平方。这显示了如何将值推送到 Boost.Cob alt 生成器。在 Boost.Cobalt 中，将值推送到生成器则为传递参数（上例中，传递的参数是整数）。
 
 本例中的生成器虽然正确，但可能会令人困惑。请看以下代码行：
 
@@ -154,9 +155,9 @@ auto g = square_generator(10);
 std::cout << co_await g(4) << std::endl;
 \end{cpp}
 
-这将打印 10 的平方并将 4 推送到生成器。如您所见，打印的值不是传递给生成器的值的平方。这是因为生成器用一个值（在此示例中为 10）初始化，并且当调用者调用 co\_await 传递另一个值时，它会生成平方值。生成器在收到新值 4 时将产生 100，然后在收到值 12 时将产生 16，依此类推。
+这将打印 10 的平方并将 4 推送到生成器，输出的值不是传递给生成器的值的平方。这是因为生成器用一个值（在此示例中为 10）初始化，并且当调用者调用 co\_await 传递另一个值时，会生成平方值。生成器在收到新值 4 时将产生 100，然后在收到值 12 时将产生 16，依此类推。
 
-我们说过 Boost.Cobalt 生成器是急切的，但也可以让它在开始执行时立即等待（co\_await） 。以下示例显示了如何执行此操作：
+Boost.Cobalt 生成器是立即的，但也可以让它在开始执行时立即等待（co\_await）。以下示例显示了如何执行此操作：
 
 \begin{cpp}
 #include <iostream>
@@ -186,7 +187,7 @@ boost::cobalt::main co_main(int, char*[]) {
 
 \begin{itemize}
 \item
-我们在不传递任何参数的情况下创建生成器：
+不传递参数的情况下创建生成器：
 
 \begin{cpp}
 auto g = square_generator();
@@ -199,10 +200,10 @@ auto g = square_generator();
 auto x = co_await boost::cobalt::this_coro::initial;
 \end{cpp}
 
-这使得生成器等待第一个压入的整数。这表现为一个惰性生成器（实际上，它立即开始执行，因为生成器是急于执行的，但它做的第一件事是等待一个整数）。
+这使得生成器等待第一个压入的整数。这表现为一个惰性生成器（实际上，立即开始执行，生成器立即执行，但它做的第一件事是等待一个整数）。
 
 \item
-生成的值是我们期望从代码中得到的：
+生成的值期望从代码中得到：
 
 \begin{cpp}
 std::cout << co_await g(10) << std::endl;
@@ -211,15 +212,15 @@ std::cout << co_await g(10) << std::endl;
 这将打印100，而不是之前输入的整数的平方。
 \end{itemize}
 
-让我们在这里总结一下这个示例的作用： co\_main 函数调用 square\_generator 协程来生成整数值的平方。生成器协程在开始时暂停自身，等待第一个整数，并在产生每个平方后暂停自身。这个示例故意很简单，只是为了说明如何使用 Boost.Cobalt 编写生成器。
+这里总结一下这个示例的作用： co\_main 函数调用 square\_generator 协程来生成整数值的平方。生成器协程在开始时暂停自身，等待第一个整数，并在产生每个平方后暂停自身。这个示例故意很简单，只是为了说明如何使用 Boost.Cobalt 编写生成器。
 
-上述程序的一个重要特点是它在单线程中运行。这意味着 co\_main 和生成器协程会相继运行。
+上述程序的一个重要特点是它在单线程中运行，所以 co\_main 和生成器协程会相继运行。
 
 \mySubsubsection{10.3.3.}{斐波那契数列生成器}
 
-在本节中，我们将实现一个类似于第 8 章中实现的斐波那契数列生成器。这将让我们看到使用 Boost.Cobalt 编写生成器协程比使用纯 C++20 而不使用任何协程库要容易得多。
+本节中，将实现一个类似于第 8 章中实现的斐波那契数列生成器。体验到使用 Boost.Cobalt 编写生成器协程，比使用纯 C++20 容易得多。
 
-我们编写了两个版本的生成器。第一个版本计算斐波那契数列的任意项。我们推送想要生成的项，然后就得到了它。此生成器使用 lambda 作为斐波那契计算器：
+我们编写了两个版本的生成器。第一个版本计算斐波那契数列的任意项。推送想要生成的项，然后就得到了它。此生成器使用 lambda 作为斐波那契计算器：
 
 \begin{cpp}
 boost::cobalt::generator<int, int> fibonacci_term() {
@@ -250,7 +251,7 @@ boost::cobalt::generator<int, int> fibonacci_term() {
 }
 \end{cpp}
 
-在前面的代码中，我们看到这个生成器与我们在上一节中实现的用于计算数字平方的生成器非常相似。在协程的开头，我们有以下内容：
+前面的代码中，了解到这个生成器与我们在上一节中实现的用于计算数字平方的生成器非常相似。在协程的开头，有以下内容：
 
 \begin{cpp}
 auto x = co_await boost::cobalt::this_coro::initial;
@@ -258,7 +259,7 @@ auto x = co_await boost::cobalt::this_coro::initial;
 
 这行代码暂停协程以等待第一个输入值。
 
-然后我们有以下内容：
+然后有以下内容：
 
 \begin{cpp}
 while (x != -1) {
@@ -266,9 +267,9 @@ while (x != -1) {
 }
 \end{cpp}
 
-这将生成请求的斐波那契数列项，并暂停自身，直到请求下一个项。当请求的项不等于 -1 时，我们可以继续请求更多值，直到按下 -1 终止协程。
+这将生成请求的斐波那契数列项，并暂停自身，直到请求下一个项。当请求的项不等于 -1 时，可以继续请求更多值，直到按下 -1 终止协程。
 
-下一个版本的斐波那契生成器将根据要求生成无限数量的项。无限意味着潜在无限。可以将此生成器视为始终准备生成另一个斐波那契数列：
+下一个版本的斐波那契生成器将根据要求生成无限数量的项，可以将此生成器视为始终准备生成另一个斐波那契数列：
 
 \begin{cpp}
 boost::cobalt::generator<int> fibonacci_sequence() {
@@ -288,9 +289,9 @@ boost::cobalt::generator<int> fibonacci_sequence() {
 
 上述代码很容易理解：协程产生一个值并将自身挂起，直到请求另一个值，协程计算出新值并产生它并再次陷入无限循环中。
 
-在这种情况下，我们可以看到协程的优势：我们可以在需要时逐个生成斐波那契数列的项。我们不需要保留任何状态来生成下一个项，因为状态保存在协程中。
+可以看到协程的优势：可以在需要时逐个生成斐波那契数列的项。不需要保留任何状态来生成下一个项，因为状态保存在协程中。
 
-还要注意的是，即使函数执行了无限循环，由于它是协程，它会一次又一次地暂停和恢复，避免阻塞当前线程。
+需要注意的是，即使函数执行了无限循环，由于它是协程，会一次又一次地暂停和恢复，避免阻塞当前线程。
 
 
 

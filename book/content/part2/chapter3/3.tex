@@ -1,13 +1,14 @@
 
-在本节中，我们将学习如何创建线程、在构造期间传递参数、从线程返回值、取消线程执行、捕获异常等等。
+本节中，将介绍如何创建线程、在构造期间传递参数、从线程返回值、取消线程执行、捕获异常等。
 
-\mySubsubsection{3.3.1.}{Thread creation}
+\mySubsubsection{3.3.1.}{创建线程}
 
-线程创建后会立即执行。它只会被操作系统调度过程延迟。如果没有足够的资源来并行运行父线程和子线程，则它们的运行顺序是不确定的。
+线程创建后会立即执行，只会被操作系统调度所延迟。如果没有足够的资源来并行运行父线程和子线程，则其运行顺序不确定。
 
-构造函数参数定义线程要执行的函数或函数对象。此可调用对象不应返回任何内容，因为其返回值将被忽略。如果由于某种原因线程执行以异常结束，则除非捕获到异常，否则将调用 std::terminate，正如我们将在本章后面看到的那样。
+构造函数参数定义线程要执行的函数或函数对象。此可调用对象不返回任何内容，将忽略其返回值。如果由于某种原因线程执行以异常结束，则除非捕获到异常，否则调用 std::terminate。
 
-在下面的例子中，我们使用不同的可调用对象创建了六个线程。
+下面的例子中，使用不同的可调用对象创建了六个线程。
+
 t1 使用函数指针：
 
 \begin{cpp}
@@ -46,7 +47,7 @@ public:
 std::thread t4{FuncObjectClass()};
 \end{cpp}
 
-t5 使用非静态成员函数通过传递成员函数的地址和对象的地址来调用成员函数：
+t5 使用非静态成员函数，通过传递成员函数的地址和对象的地址来调用成员函数：
 
 \begin{cpp}
 class Obj {
@@ -60,7 +61,7 @@ Obj obj;
 std::thread t5(&Obj::func, &obj);
 \end{cpp}
 
-t6 使用静态成员函数，由于方法是静态的，因此只需要成员函数的地址：
+t6 使用静态成员函数，由于方法是静态的，只需要成员函数的地址：
 
 \begin{cpp}
 class Obj {
@@ -72,34 +73,32 @@ public:
 std::thread t6(&Obj::static_func);
 \end{cpp}
 
-线程创建会产生一些开销，可以使用线程池来减少这些开销，我们将在第 4 章中进行探讨。
+线程创建会产生一些开销，可以使用线程池来减少这些开销，这些将在第 4 章中进行探讨。
 
-\mySamllsection{检查硬件并发性}
+\mySamllsection{检查硬件的并发性}
 
-有效线程管理的策略之一是平衡线程数和可用资源，以避免过度订阅，这与可扩展性和性能有关，并在上一章中进行了评论。
+有效线程管理的策略之一是平衡线程数和可用资源，以避免过度分配，这与可扩展性和性能有关。
 
-要检索操作系统支持的并发线程数，我们可以使用 \verb|std::thread::hardware_concurrency()| 函数：
+要检索操作系统支持的并发线程数，可以使用 \verb|std::thread::hardware_concurrency()|：
 
 \begin{cpp}
 const auto processor_count = std::thread::hardware_concurrency();
 \end{cpp}
 
-必须认为此函数返回的值仅提供有关将同时运行的线程数的提示。它有时定义不明确，因此返回值为 0。
+必须认为此函数返回的值，仅提供有关将同时运行的线程数的提示。有时定义不明确，因此返回值为 0。
 
 \mySubsubsection{3.3.2.}{同步流写入}
 
-当我们从两个或多个线程使用 std::cout 将消息打印到控制台时，输出结果可能会很混乱。
-这是由于输出流中发生了竞争条件。
+当两个或多个线程使用 std::cout 将消息打印到控制台时，输出结果可能会很混乱。这是由于输出流中发生了竞争。
 
-如上一章所述，竞争条件是并发和多线程程序中发生的软件错误，其行为取决于共享资源上发生的事件序列，其中至少有一个操作不是原子的。我们将在第 4 章中详细了解如何避免它们。此外，我们将在第 12 章中学习如何使用 Clang 的清理程序调试竞争条件。
+如上一章所述，条件竞争是并发和多线程程序中发生的软件错误，其行为取决于共享资源上发生的事件序列，其中至少有一个操作不是原子的。
 
-以下代码片段显示了两个线程打印数字序列。 t1 线程应打印包含 1 2 3 4 序列的行。 t2 线程应打印 5 6 7 8 序列。每个线程打印其序列 100 次。在主线程退出之前，它使用 join() 等待 t1 和 t2 完成。
-
-本章后面将有更多关于加入线程的内容。
+以下代码显示了两个线程打印数字序列。 t1 线程应打印包含“1 2 3 4”， t2 线程应打印“5 6 7 8”。每个线程打印其序列 100 次。在主线程退出之前，使用 join() 等待 t1 和 t2 完成。
 
 \begin{cpp}
 #include <iostream>
 #include <thread>
+
 int main() {
     std::thread t1([]() {
         for (int i = 0; i < 100; ++i) {
@@ -107,19 +106,22 @@ int main() {
             << std::endl;
         }
     });
+
     std::thread t2([]() {
         for (int i = 0; i < 100; ++i) {
             std::cout << "5 " << "6 " << "7 " << "8 "
             << std::endl;
         }
     });
+
     t1.join();
     t2.join();
+
     return 0;
 }
 \end{cpp}
 
-但是，运行前面的示例会显示以下内容：
+运行后，会显示以下内容：
 
 \begin{shell}
 6 1 2 3 4
@@ -127,7 +129,7 @@ int main() {
 1 2 3 5 6 7 8
 \end{shell}
 
-为了避免这些问题，我们可以简单地从特定线程写入或使用对 std::cout 对象进行原子调用的 std::ostringstream 对象：
+为了避免这些问题，可以简单地从特定线程写入或使用对 std::cout 对象进行原子调用的 std::ostringstream 对象：
 
 \begin{cpp}
 std::ostringstream oss;
@@ -135,17 +137,19 @@ oss << "1 " << "2 " << "3 " << "4 " << "\n";
 std::cout << oss.str();
 \end{cpp}
 
-从 C++20 开始，我们还可以使用 std::osyncstream 对象。它们的行为类似于 std::cout，但在访问同一流的线程之间具有写入同步。但是，由于只有从其内部缓冲区到输出流的传输步骤是同步的，因此每个线程都需要自己的 std::osyncstream 实例。
+从 C++20 开始，还可以使用 std::osyncstream 对象。其行为类似于 std::cout，在访问同流的线程之间具有写入同步。由于只有从其内部缓冲区到输出流的传输步骤是同步的，因此每个线程都需要自己的 std::osyncstream 实例。
 
-当流被销毁时，即明确调用 emit() 时，内部缓冲区会被转移。
+当流销毁时，即明确调用 emit() 时，内部缓冲区会转移。
 
-以下是允许每条打印线同步的简单解决方案：
+以下是每条打印线同步的简单解决方案：
 
 \begin{cpp}
 #include <iostream>
 #include <syncstream>
 #include <thread>
+
 #define sync_cout std::osyncstream(std::cout)
+
 int main() {
     std::thread t1([]() {
         for (int i = 0; i < 100; ++i) {
@@ -153,19 +157,22 @@ int main() {
             << std::endl;
         }
     });
+
     std::thread t2([]() {
         for (int i = 0; i < 100; ++i) {
             sync_cout << "5 " << "6 " << "7 " << "8 "
             << std::endl;
         }
     });
+
     t1.join();
     t2.join();
+
     return 0;
 }
 \end{cpp}
 
-两种解决方案都将输出序列而不进行交错
+输出为:
 
 \begin{shell}
 1 2 3 4
@@ -175,9 +182,9 @@ int main() {
 
 由于这种方法现在是输出内容时避免竞争条件的官方 C++20 方法，我们将在本书的其余部分使用 std::osyncstream 作为默认方法。
 
-\mySubsubsection{3.3.3.}{使当前线程休眠}
+\mySubsubsection{3.3.3.}{休眠当前线程}
 
-\verb|std::this_thread| 是一个命名空间。它允许从当前线程访问函数，以将执行交给另一个线程或阻止当前任务的执行并等待一段时间。
+\verb|std::this_thread| 是一个命名空间,允许从当前线程访问函数，以将执行交给另一个线程或阻止当前任务的执行并等待一段时间。
 
 \verb|std::this_thread::sleep_for| 和 \verb|std::this_thread::sleep_until| 函数会在给定的时间内阻止线程的执行。
 
@@ -187,16 +194,17 @@ int main() {
 当对某种共享资源的需求超过供应时，就会发生资源争用，从而导致性能下降。
 \end{myTip}
 
-\verb|std::this_thread::sleep_until| 的工作方式与 \verb|std::this_thread::sleep_for| 类似。但是，它不是休眠一段时间，而是休眠到特定时间点。计算时间点的时钟必须满足时钟要求（您可以在此处找到有关此要求的更多信息： \url{https://en.cppreference.com/w/cpp/named_req/Clock}）。标准建议使用稳定时钟而不是系统时钟来设置持续时间。
+\verb|std::this_thread::sleep_until| 的工作方式与 \verb|std::this_thread::sleep_for| 类似。但不是休眠一段时间，而是休眠到特定时间点。计算时间点的时钟必须满足时钟要求（可以在此处找到有关此要求的更多信息： \url{https://en.cppreference.com/w/cpp/named_req/Clock}）。标准建议使用稳定时钟，而非系统时钟来设置持续时间。
 
 \mySubsubsection{3.3.4.}{识别线程}
 
-在调试多线程解决方案时，了解哪个线程正在执行给定函数很有用。每个线程都可以通过标识符来标识，从而可以记录其值以进行跟踪和调试。
+在调试多线程解决方案时，了解哪个线程正在执行给定函数很有用。每个线程都可以通过标识符来标识，可以记录其值以进行跟踪和调试。
 
-std::thread::id 是一个轻量级类，它定义了线程对象（std::thread 和 std::jthread，我们将在本章后面介绍）的唯一标识符。此标识符可通过 \verb|get_id()| 函数检索。
-线程标识符对象可以通过输出流进行比较、序列化和打印。它们还可以用作映射容器中的键，因为它们受 std::hash 函数支持。
+std::thread::id 是一个轻量级类，定义了线程对象（std::thread 和 std::jthread）的唯一标识符。此标识符可通过 \verb|get_id()| 函数检索。
 
-以下示例打印 t 线程的标识符。在本章后面，我们将学习如何创建线程并休眠一段时间：
+线程标识符对象可以通过输出流进行比较、序列化和打印。还可以用作映射容器中的键，其支持 std::hash 函数。
+
+以下示例打印 t 线程的标识符。本章后面，将介绍如何创建线程并休眠一段时间：
 
 \begin{cpp}
 #include <chrono>
@@ -217,13 +225,13 @@ int main() {
 }
 \end{cpp}
 
-请记住，当一个线程完成时，它的标识符可以被未来的线程重用。
+当一个线程完成时，其标识符可以在未来重用。
 
 \mySubsubsection{3.3.5.}{传递参数}
 
 参数可以通过值、引用或指针传递给线程。
 
-这里我们可以看到如何通过值传递参数：
+如何通过值传递参数：
 
 \begin{cpp}
 void funcByValue(const std::string& str, int val) {
@@ -234,7 +242,7 @@ std::string str{"Passing by value"};
 std::thread t(funcByValue, str, 1);
 \end{cpp}
 
-按值传递可以避免数据争用。但是，由于数据需要复制，因此成本更高。
+按值传递可以避免数据争用。但由于数据需要复制，因此成本更高。
 
 下一个示例显示如何通过引用传递值：
 
@@ -262,19 +270,19 @@ std::vector<int> v{1, 2, 3, 4, 5};
 std::thread t(printVector, std::cref(v));
 \end{cpp}
 
-通过使用 ref()（非常量引用）或 cref()（常量引用）来实现引用传递。两者都在 <functional> 头文件中定义。这允许可变参数模板定义线程构造函数以将参数视为引用。
+通过使用 ref()（非常量引用）或 cref()（常量引用）来实现引用传递。两者都在 <functional> 头文件中定义，允许可变参数模板定义线程构造函数以将参数视为引用。
 
 这些辅助函数用于生成 \verb|std::reference_wrapper| 对象，该对象将引用包装在可复制和可赋值的对象中。传递参数时缺少这些函数会导致参数按值传递。
 
-您还可以按如下方式将对象移动到线程中：
+还可以按如下方式将对象移动到线程中：
 
 \begin{cpp}
 std::thread t(printVector, std::move(v));
 \end{cpp}
 
-但是，请注意，在将 v 向量移入 t 线程后尝试在主线程中访问它会导致未定义的行为。
+但请注意，在将 v 移入 t 线程后，尝试在主线程中访问它会导致未定义行为。
 
-最后，我们还可以通过 lambda 捕获来允许线程访问变量：
+最后，还可以通过 lambda 捕获来允许线程访问变量：
 
 \begin{cpp}
 std::string str{"Hello"};
@@ -283,13 +291,13 @@ std::thread t([&]() {
 });
 \end{cpp}
 
-在此示例中， str 变量被 t 线程作为嵌入的 lambda 函数捕获的引用来访问。
+此示例中，str 变量会被 t 线程作为嵌入的 lambda 函数捕获的引用来访问。
 
 \mySubsubsection{3.3.6.}{返回值}
 
-要返回在线程中计算的值，我们可以使用具有同步机制的共享变量，例如互斥锁、锁或原子变量。
+要返回在线程中计算的值，可以使用具有同步机制的共享变量，例如：互斥锁、锁或原子变量。
 
-在下面的代码片段中，我们可以看到如何使用非常量引用传递的参数（使用 ref()）返回由线程计算的值。结果变量在 func 函数中的 t 线程内计算。结果值可以从主线程中看到。正如我们将在下一节中了解到的那样， join() 函数只是等待 t 线程完成，然后让主线程继续运行，然后检查结果变量：
+下面的代码段中，可以看到如何使用非常量引用传递的参数（使用 ref()）返回由线程计算的值。结果变量在 func 函数中的 t 线程内计算。结果值可以从主线程中看到。join() 函数只是等待 t 线程完成，然后让主线程继续运行，然后检查结果变量：
 
 \begin{cpp}
 #include <chrono>
@@ -318,9 +326,9 @@ int main() {
 }
 \end{cpp}
 
-引用参数可以是对输入对象本身的引用，也可以是对我们希望存储结果的另一个变量的引用，正如本例中使用结果变量所做的那样。
+引用参数可以是对输入对象本身的引用，也可以对存储结果的另一个变量的引用。
 
-我们还可以 使用 lambda 捕获返回值，如下所示：
+还可以使用 lambda 捕获返回值：
 
 \begin{cpp}
 std::thread t([&]() { func(result); });
@@ -328,7 +336,7 @@ t.join();
 sync_cout << "Result: " << result << std::endl;
 \end{cpp}
 
-我们还可以通过写入受互斥锁保护的共享变量来实现这一点，在执行写入操作之前锁定互斥锁（例如，使用 \verb|std::lock_guard|）。但是，我们将在第 4 章中更深入地探讨这些机制：
+还可以通过写入受互斥锁保护的共享变量来实现，在执行写入操作之前锁定互斥锁（例如，使用 \verb|std::lock_guard|）：
 
 \begin{cpp}
 #include <chrono>
@@ -361,13 +369,13 @@ int main() {
 }
 \end{cpp}
 
-还有一种更优雅的方法可以从线程返回值。这涉及使用 Future 和 Promise，我们将在第 6 章中学习它们。
+还有一种更优雅的方法可以从线程返回值。这涉及使用 Future 和 Promise，将在第 6 章中介绍它们。
 
 \mySubsubsection{3.3.7.}{移动线程}
 
-线程可以移动但不能复制。这是为了避免有两个不同的线程对象代表同一个硬件线程。
+线程可以移动但不能复制，为了避免有两个不同的线程对象代表同一个硬件线程。
 
-在以下示例中，使用 std::move 将 t1 移动到 t2。因此， t2 继承了与移动前的 t1 相同的标识符，并且 t1 不可连接，因为它不再包含任何有效线程：
+以下示例中，使用 std::move 将 t1 移动到 t2。因此， t2 继承了与移动前的 t1 相同的标识符，并且 t1 不可汇入：
 
 \begin{cpp}
 #include <chrono>
@@ -389,26 +397,25 @@ int main() {
 }
 \end{cpp}
 
-当将 std::thread 对象移动到另一个 std::thread 对象时，移动自线程对象将达到不再代表真实线程的状态。这种情况也会发生在默认构造函数分离或合并后产生的线程对象上。我们将在下一节介绍这些操作。
+当将 std::thread 对象移动到另一个 std::thread 对象时，移动自线程对象将达到不再代表真实线程的状态。这种情况也会发生在默认构造函数分离或汇入后产生的线程对象上。
 
 \mySubsubsection{3.3.8.}{等待线程完成}
 
-在某些情况下，一个线程需要等待另一个线程完成，以便可以使用后者计算的结果。其他用例包括在后台运行一个线程，将其分离，然后继续执行主线程。
+某些情况下，一个线程需要等待另一个线程完成，以便可以使用后者计算的结果。其他用例包括在后台运行一个线程将其分离，然后继续执行主线程。
 
 \mySamllsection{汇入一个线程}
 
-join() 函数阻塞当前线程，等待调用 join() 函数的线程对象所标识的加入线程完成。这确保加入线程在 join() 返回后终止（有关更多详细信息，请参阅第 2 章中的线程生命周期部分） 。
+join() 函数阻塞当前线程，等待调用 join() 函数的线程对象所标识的汇入线程完成。这确保汇入线程在 join() 返回后终止（有关更多详细信息，请参阅第 2 章中的线程生命周期部分） 。
 
-很容易忘记使用 join() 函数。连接线程 (jthread) 解决了这个问题。它从 C++20 开始可用。
-我们将在下一节中介绍它。
+很容易忘记使用 join() 函数，汇入线程 (jthread) 解决了这个问题。它从 C++20 开始可用，我们将在下一节中介绍它。
 
 \mySamllsection{检查线程是否可以汇入}
 
-如果线程中尚未调用 join() 函数，则该线程被视为可连接且因此处于活动状态。即使线程已完成代码执行但仍未连接，情况也是如此。另一方面，默认构造的线程或已连接的线程不可连接。
+如果线程中尚未调用 join() 函数，则该线程视为可汇入且因此处于活动状态。即使线程已完成代码执行但仍未汇入，情况也是如此。另一方面，默认构造的线程或已汇入的线程不可汇入。
 
 要检查一个线程是否可连接，只需使用 std::thread::joinable() 函数。
 
-让我们在以下示例中看看 std::thread::join() 和 std::thread::joinable() 的用法：
+以下示例中看一下 std::thread::join() 和 std::thread::joinable() 的用法：
 
 \begin{cpp}
 #include <chrono>
@@ -439,14 +446,15 @@ int main() {
 }
 \end{cpp}
 
-使用默认构造函数（未指定可调用对象）构造 t1 后，线程将不可连接。由于 t2 是指定函数构造的，因此构造后 t2 可连接。但是，当 t1 和 t2 交换时， t1 再次变为可连接，而 t2 不再可连接。然后主线程等待 t1 连接，因此它不再可连接。尝试连接不可连接的线程 t2 会导致未定义的行为。最后，不连接可连接的线程将导致资源泄漏或由于意外使用共享资源而导致程序崩溃。
+使用默认构造函数（未指定可调用对象）构造 t1 后，线程将不可汇入。由于 t2 是指定函数构造的，因此构造后 t2 可汇入。但当 t1 和 t2 交换时， t1 再次变为可汇入，而 t2 不再可汇入。然后主线程等待 t1 汇入，因此它不再可汇入。尝试汇入不可汇入的线程 t2 会导致未定义行为。最后，不汇入可汇入的线程将导致资源泄漏，或由于意外使用共享资源而导致程序崩溃。
 
-\mySamllsection{通过分离守护线程}
+\mySamllsection{分离守护线程}
 
-如果我们希望线程继续作为守护线程在后台运行，但完成当前线程的执行，我们可以使用 st d::thread::detach() 函数。守护线程是在后台执行一些不需要运行完成的任务的线程。如果主程序退出，所有守护线程都将终止。如前所述，线程必须在主线程终止之前加入或分离，否则程序将中止其执行。
-调用 detach 之后，分离的线程无法使用 std::thread 对象进行控制或连接（因为它正在等待完成），因为该对象不再代表分离的线程。
+如果希望线程继续作为守护线程在后台运行，但完成当前线程的执行，可以使用 std::thread::detach()。守护线程是在后台执行一些不需要运行完成的任务的线程。如果主程序退出，所有守护线程都将终止。如前所述，线程必须在主线程终止之前汇入或分离，否则程序将中止其执行。
 
-以下示例显示了一个名为 t 的守护线程，它在构造后立即分离，并在后台运行 daemonThread() 函数。此函数执行三秒钟，然后退出，完成线程执行。同时，主线程在退出之前比线程执行时间多休眠一秒钟：
+调用 detach 之后，分离的线程无法使用 std::thread 对象进行控制或汇入（因为它正在等待完成），因为其不再代表分离的线程。
+
+以下示例显示了一个名为 t 的守护线程，在构造后立即分离，并在后台运行 daemonThread() 函数。此函数执行三秒钟，然后退出，完成线程执行。同时，主线程在退出之前比线程执行时间多休眠一秒钟：
 
 \begin{cpp}
 #include <chrono>
@@ -485,9 +493,9 @@ int main() {
 
 \mySubsubsection{3.3.9.}{汇入线程——jthread类}
 
-从 C++20 开始，有一个新的类： std::jthread。此类与 std:thread 类似，但具有线程在销毁时重新加入的附加功能，遵循资源获取即初始化 (RAII) 技术。在某些情况下，它可以被取消或停止。
+从 C++20 开始，有一个新的类：std::jthread。此类与 std:thread 类似，但具有线程在销毁时重新汇入的功能，遵循资源获取即初始化 (RAII) 技术。在某些情况下，可以取消或停止。
 
-从下面的例子中可以看到， jthread 线程具有与 std::thread 相同的接口。唯一的区别是我们不需要调用 join() 函数来确保主线程等待 t 线程加入：
+从下面的例子中可以看到， jthread 线程具有与 std::thread 相同的接口。唯一的区别是不需要调用 join() 函数来确保主线程等待 t 线程汇入：
 
 \begin{cpp}
 #include <chrono>
@@ -507,7 +515,7 @@ int main() {
 }
 \end{cpp}
 
-当两个 std::jthreads 被销毁时，它们的析构函数将以与构造函数相反的顺序调用。为了演示此行为，让我们实现一个线程包装器类，该类在创建和销毁包装线程时打印一些消息：
+当两个 std::jthread 汇入销毁时，其析构函数将以与构造函数相反的顺序调用。为了演示此行为，让实现一个线程包装器类，该类在创建和销毁包装线程时打印一些消息：
 
 \begin{cpp}
 #include <chrono>
@@ -539,7 +547,7 @@ private:
 };
 \end{cpp}
 
-使用这个 JthreadWrapper 包装器类，我们启动三个执行 func 函数的线程。每个线程将等待一秒钟后退出： void func(const std::st
+使用这个 JthreadWrapper 包装器类，启动三个执行 func 函数的线程。每个线程将等待一秒钟后退出：
 
 \begin{cpp}
 void func(const std::string& name) {
@@ -576,20 +584,19 @@ Thread t2 being destroyed
 Thread t1 being destroyed
 \end{shell}
 
-我们可以看到，首先创建 t1，然后创建 t2，最后创建 t3。析构函数遵循相反的顺序，首先销毁 t3，然后销毁 t2，最后销毁 t1。
+可以看到，首先创建 t1，然后创建 t2，最后创建 t3。析构函数遵循相反的顺序，首先销毁 t3，然后销毁 t2，最后销毁 t1。
 
-由于 jthreads 可以避免我们忘记在线程中使用 join 时出现的陷阱，因此我们更喜欢使用 std:: jthread 而不是 std::thread。在某些情况下，我们需要使用对 join() 的显式调用来确保在转到另一项任务之前线程已连接并且资源已正确释放。
+由于 jthread 可以避免忘记在线程中使用 join 时出现的问题，因此我们更倾向使用 std:: jthread，而非 std::thread。某些情况下，需要使用对 join() 的显式调用，来确保在转到另一项任务之前线程已汇入，并且资源已正确释放。
 
-\mySubsubsection{3.3.10.}{丢弃线程执行}
+\mySubsubsection{3.3.10.}{丢弃执行线程}
 
 线程还可以决定暂停执行，让实现重新安排线程的执行，并给予其他线程运行的机会。
 
 \verb|std::this_thread::yield| 方法向操作系统提供重新安排另一个线程的提示。此行为与实现有关，取决于操作系统调度程序和系统的当前状态。
 
-一些 Linux 实现会暂停当前线程并将其移回线程队列，以调度所有具有相同优先级的线程。
-如果此队列为空，则让出无效。
+一些 Linux 实现会暂停当前线程并将其移回线程队列，以调度所有具有相同优先级的线程。如果此队列为空，则让出无效。
 
-下面的例子展示了两个线程 t1 和 t2 执行相同的工作函数。它们随机选择执行某些工作（锁定互斥锁，我们将在下一章中学习，并等待三秒钟）或将执行权交给另一个线程：
+下面的例子展示了两个线程 t1 和 t2 执行相同的工作函数。它们随机选择执行某些工作（锁定互斥锁，将在下一章中学习，并等待三秒钟）或将执行权交给另一个线程：
 
 \begin{cpp}
 #include <iostream>
@@ -625,25 +632,27 @@ int main() {
             }
         }
     };
+
     std::jthread t1(work, "t1");
     std::jthread t2(work, "t2");
+
     return 0;
 }
 \end{cpp}
 
-运行此示例时，当执行到达yield命令时，我们可以看到当前正在运行的线程如何停止并使另一个线程重新开始执行。
+运行此示例时，当执行到达yield命令时，可以看到当前正在运行的线程如何停止，并使另一个线程重新开始执行。
 
 \mySubsubsection{3.3.11.}{线程取消}
 
-如果我们不再对线程正在计算的结果感兴趣，我们就会取消该线程并避免更多的计算成本。
+如果不再对线程正在计算的结果感兴趣，就会取消该线程并避免更多的计算成本。
 
-终止线程可能是一种解决方案。但是，这会导致属于该线程处理的资源（例如从该线程启动的其他线程、锁、连接等）无法处理。这可能意味着以未定义的行为、在互斥锁下锁定的关键部分或任何其他意外问题结束程序。
+终止线程可能是一种解决方案，但这会导致属于该线程处理的资源（例如：从该线程启动的其他线程、锁、汇入等）无法处理。这可能意味着以未定义的行为、在互斥锁下锁定的关键部分或其他意外问题结束程序。
 
-为了避免这些问题，我们需要一个无数据争用机制，让线程知道停止执行的意图（请求停止），以便线程可以采取取消其工作并正常终止所需的所有具体步骤。
+为了避免这些问题，需要一个无数据争用机制，让线程知道停止执行的意图（请求停止），以便线程可以采取取消其工作并正常终止所需的所有具体步骤。
 
-实现此目的的一种可能方法是使用由线程定期检查的原子变量。我们将在下一章中详细探讨原子变量。现在，让我们将原子变量定义为一个变量，由于其原子事务操作和内存模型，许多线程可以写入或读取该变量，而无需任何锁定机制或数据争用。
+实现此目的的一种可能方法是使用由线程定期检查的原子变量。现在，将原子变量定义为一个变量，由于其原子事务操作和内存模型，许多线程可以写入或读取该变量，而无需任何锁定机制或数据争用。
 
-举个例子，我们创建一个 Counter 类，每秒调用一次回调。这将无限执行，直到调用者使用stop() 函数时，运行的原子变量被设置为 false：
+举个例子，创建一个 Counter 类，每秒调用一次回调。这将无限执行，直到调用者使用stop() 函数时，运行的原子变量设置为 false：
 
 \begin{cpp}
 #include <chrono>
@@ -674,7 +683,7 @@ private:
 };
 \end{cpp}
 
-在调用函数中，我们将按如下方式实例化 Counter。然后，在需要时（这里是三秒后），我们将调用 stop() 函数，让 Counter 退出循环并终止线程执行：
+调用函数中，将按如下方式实例化 Counter。然后，在需要时（这里是三秒后）调用 stop() 函数，让 Counter 退出循环并终止线程执行：
 
 \begin{cpp}
 int main() {
@@ -686,21 +695,21 @@ int main() {
 }
 \end{cpp}
 
-自 C++20 以来，出现了一种称为线程协作中断的新机制。可通过 \verb|std::stop_token| 获得。
+自 C++20 以来，出现了一种称为线程协作中断的新机制，可通过 \verb|std::stop_token| 获得。
 
-线程通过检查调用 \verb|std::stop_token::stop_requested()| 函数的结果知道已请求停止。
+线程通过检查调用 \verb|std::stop_token::stop_requested()| 函数的结果知晓请求停止。
 
-为了生成 \verb|stop_token|，我们将通过 \verb|std::stop_source::get_token()| 函数使用 \verb|stop_source| 对象。
+为了生成 \verb|stop_token|，将通过 \verb|std::stop_source::get_token()| 函数使用 \verb|stop_source| 对象。
 
-此线程取消机制在 std::jthead 对象中通过 \verb|std::stop_source| 类型的内部成员实现，其中存储了共享的停止状态。 jthread 构造函数接受 \verb|std::stop_token| 作为其第一个参数。当在执行期间请求停止时使用此方法。
+此线程取消机制在 std::jthead 对象中通过 \verb|std::stop_source| 类型的内部成员实现，其中存储了共享的停止状态。jthread 构造函数接受 \verb|std::stop_token| 作为其第一个参数。当在执行期间请求停止时，可使用此方法。
 
-因此， std::jthread 相对于 std::thread 对象来说，额外暴露了一些函数来管理停止标记，这些函数分别是 \verb|get_stop_source()|、 \verb|get_stop_token()| 和 \verb|request_stop()|。
+因此， std::jthread 相对于 std::thread 对象来说，暴露了一些函数来管理停止标记，这些函数分别是 \verb|get_stop_source()|、 \verb|get_stop_token()| 和 \verb|request_stop()|。
 
-当调用 \verb|request_stop()| 时，它会向内部停止状态发出停止请求，该请求会原子地更新以避免竞争条件（您将在第 4 章中了解有关原子变量的更多信息）。
+当调用 \verb|request_stop()| 时，会向内部停止状态发出停止请求，该请求会原子地更新以避免竞争条件。
 
-让我们在下面的例子中检查所有这些功能是如何工作的。
+让在下面的例子中检查所有这些功能是如何工作的。
 
-首先，我们将定义一个模板函数来展示停止项对象（\verb|stop_token| 或 \verb|stop_source|）的属性：
+首先，定义一个模板函数来展示停止项对象（\verb|stop_token| 或 \verb|stop_source|）的属性：
 
 \begin{cpp}
 #include <chrono>
@@ -726,7 +735,7 @@ void show_stop_props(std::string_view name,
 };
 \end{cpp}
 
-现在，在 main() 函数中，我们将启动一个工作线程，获取其停止令牌对象，并显示其属性：
+main() 函数中，将启动一个工作线程，获取其停止令牌对象，并显示其属性：
 
 \begin{cpp}
 auto worker1 = std::jthread(func_with_stop_token);
@@ -734,7 +743,7 @@ std::stop_token stop_token = worker1.get_stop_token();
 show_stop_props("stop_token", stop_token);
 \end{cpp}
 
-Worker1 正在运行在随后的代码块中定义的 \verb|func_with_stop_token()| 函数。在此函数中，使用\verb|stop_requested()| 函数检查停止令牌。如果此函数返回 true，则表示已请求停止，因此该函数将直接返回，终止线程执行。否则，它将运行下一个循环迭代，使当前线程再休眠 300 毫秒，直到下一次停止请求检查：
+Worker1 正在运行在随后的代码块中定义的 \verb|func_with_stop_token()| 函数。此函数中，使用\verb|stop_requested()| 函数检查停止令牌。如果此函数返回 true，则表示已请求停止，因此该函数将直接返回，终止线程执行。否则，将运行下一个循环迭代，使当前线程再休眠 300 毫秒，直到下一次停止请求检查：
 
 \begin{cpp}
 void func_with_stop_token(std::stop_token stop_token) {
@@ -750,7 +759,7 @@ void func_with_stop_token(std::stop_token stop_token) {
 }
 \end{cpp}
 
-我们可以使用线程对象返回的停止令牌向主线程请求停止，如下所示：
+可以使用线程对象返回的停止令牌，并向主线程请求停止：
 
 \begin{cpp}
 worker1.request_stop();
@@ -758,7 +767,7 @@ worker1.join();
 show_stop_props("stop_token after request", stop_token);
 \end{cpp}
 
-另外，我们可以从不同的线程请求停止。为此，我们需要传递一个 \verb|stop_source| 对象。在下面的代码片段中，我们可以看到如何使用从 worker2 工作线程获取的 \verb|stop_source| 对象作为参数创建线程停止器：
+另外，可以从不同的线程请求停止。为此，需要传递一个 \verb|stop_source| 对象。下面的代码中，可以看到如何使用从 worker2 工作线程获取的 \verb|stop_source| 对象作为参数创建线程停止器：
 
 \begin{cpp}
 auto worker2 = std::jthread(func_with_stop_token);
@@ -777,9 +786,9 @@ std::this_thread::sleep_for(200ms);
 show_stop_props("stop_source after request", stop_source);
 \end{cpp}
 
-stopper 线程等待 0.5 秒，然后向 \verb|stop_source| 对象请求停止。然后 worker2 会获知该请求并终止其执行，如前所述。
+stopper 线程等待 0.5 秒，然后向 \verb|stop_source| 对象请求停止。然后， worker2 会获知该请求并终止其执行，如前所述。
 
-我们还可以注册一个回调函数，当通过停止令牌或停止源请求停止时，该函数将调用一个函数。这可以通过使用 \verb|std::stop_callback| 对象来完成，如以下代码块所示：
+还可以注册一个回调函数，当通过停止令牌或停止源请求停止时，该函数将调用一个函数。这可以通过使用 \verb|std::stop_callback| 对象来完成：
 
 \begin{cpp}
 std::stop_callback callback(worker1.get_stop_token(), []{
@@ -798,7 +807,7 @@ std::stop_callback callback_after_stop(
 });
 \end{cpp}
 
-如果 \verb|std::stop_callback| 对象被销毁，则其执行将被阻止。例如，这个作用域停止回调将不会执行，因为回调对象在超出范围时被销毁：
+如果销毁 \verb|std::stop_callback| 对象，则将阻止其执行。例如，回调对象在超出范围时被销毁，所以这个作用域停止回调将不会执行：
 
 \begin{cpp}
 {
@@ -811,7 +820,7 @@ std::stop_callback callback_after_stop(
 }
 \end{cpp}
 
-在已经请求停止后，将立即执行新的停止回调对象。在以下示例中，如果已请求停止 worke r2， \verb|callback_after_stop| 将在构造后立即执行 lambda 函数：
+请求停止后，将立即执行新的停止回调对象。以下示例中，如果已请求停止 worker2， \verb|callback_after_stop| 将在构造后立即执行 lambda 函数：
 
 \begin{cpp}
 sync_cout << "main_thread: "
@@ -827,13 +836,13 @@ std::stop_callback callback_after_stop(
 
 \mySubsubsection{3.3.12.}{捕获异常}
 
-线程中抛出的任何未处理异常都需要在该线程中捕获。否则， C++ 运行时会调用 std::termin ate，导致程序突然终止。这会导致意外行为、数据丢失，甚至程序崩溃。
+线程中抛出的未处理异常都需要在该线程中捕获。否则，C++ 运行时会调用 std::terminate，导致程序突然终止。这会导致意外行为、数据丢失，甚至程序崩溃。
 
-一种解决方案是在线程中使用 try-catch 块来捕获异常。但是，只会捕获该线程内引发的异常。异常不会传播到其他线程。
+一种解决方案是在线程中使用 try-catch 块来捕获异常。但只会捕获该线程内引发的异常，异常不会传播到其他线程。
 
-要将异常传播到另一个线程，一个线程可以捕获它并将其存储到 \verb|std::exception_ptr| 对象中，然后使用共享内存技术将其传递给另一个线程，在那里将检查 \verb|std::exception_ptr| 对象并在需要时重新抛出异常。
+要将异常传播到另一个线程，一个线程可以捕获它，并将其存储到 \verb|std::exception_ptr| 对象中，然后使用共享内存技术将其传递给另一个线程，在那里将检查 \verb|std::exception_ptr| 对象并在需要时重新抛出异常。
 
-以下示例显示了这种方法：
+以下示例展示了这种方法：
 
 \begin{cpp}
 #include <atomic>
@@ -863,7 +872,7 @@ int main() {
     std::thread t(func);
     while (!captured_exception) {
         std::this_thread::sleep_for(250ms);
-        std::cout << „In main thread\n";
+        std::cout << "In main thread\n";
     }
     try {
         std::rethrow_exception(captured_exception);
@@ -875,11 +884,11 @@ int main() {
 }
 \end{cpp}
 
-这里我们可以看到，在 t 线程执行 func 函数时，抛出了 \verb|std::runtime_error| 异常。该异常被捕获并存储在 \verb|caught_exception| 中，这是一个受互斥锁保护的 \verb|std::exception_ptr| 共享对象。通过调用 \verb|std::current_exception()| 函数可以确定抛出的异常的类型和值。
+可以看到，在 t 线程执行 func 函数时，抛出了 \verb|std::runtime_error| 异常。该异常捕获并存储在 \verb|caught_exception| 中，这是一个受互斥锁保护的 \verb|std::exception_ptr| 共享对象。通过调用 \verb|std::current_exception()| 函数可以确定抛出的异常的类型和值。
 
-在主线程中， while 循环运行直到捕获到异常。通过调用 \verb|std::rethrow_exception(captured_exc eption)|，在主线程中重新抛出异常。主线程再次捕获该异常，并在执行 catch 块时通过 std::cerr 错误流将消息打印到控制台。
+主线程中， while 循环运行直到捕获到异常。通过调用 \verb|std::rethrow_exception(captured_exception)|，在主线程中重新抛出异常。主线程再次捕获该异常，并在执行 catch 块时通过 std::cerr 错误流将消息打印到控制台。
 
-我们将在第 6 章中通过使用未来和承诺来学习更好的解决方案。
+
 
 
 

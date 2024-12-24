@@ -1,15 +1,15 @@
 
-本章中，我们将使用 C++11 和 C++20 开发不同的解决方案。因此，我们需要安装 GNU 编译器集合 (GCC)，特别是 GCC 13，以及 Clang 8（有关 C++ 编译器支持的更多详细信息，请参阅 \url{https://en.cppreference.com/w/cpp/compiler_support}）。
+本章中，将使用 C++11 和 C++20 开发不同的解决方案。因此，需要安装 GNU 编译器集合 (GCC)，特别是 GCC 13，以及 Clang 8（有关 C++ 编译器支持的更多详细信息，请参阅\url{https://en.cppreference.com/w/cpp/compiler_support}）。
 
-您可以在 https://gcc.gnu.org 上找到有关 GCC 的更多信息。您可以在此处找到有关如何安装GCC 的信息： https://gcc.gnu.org/install/index.html。
+可以在 \url{https://gcc.gnu.org} 上找到有关 GCC 的更多信息，可以在此处找到有关如何安装GCC 的信息： \url{https://gcc.gnu.org/install/index.html}。
 
-有关 Clang（支持多种语言（包括 C++）的编译器前端）的更多信息，请访问 https://clang.ll vm.org。 Clang 是 LLVM 编译器基础架构项目 (\url{https://llvm.org}) 的一部分。 Clang 中的 C++ 支持记录在此处： \url{https://clang.llvm.org/cxx_status.html}。
+有关 Clang（支持多种语言（包括 C++）的编译器前端）的更多信息，请访问 \url{https://clang.llvm.org}。 Clang 是 LLVM 编译器基础架构项目 (\url{https://llvm.org}) 的一部分。 Clang 中的 C++ 支持记录在此处： \url{https://clang.llvm.org/cxx_status.html}。
 
-本书中的一些代码片段未显示所包含的库。此外，一些函数（甚至是主要函数）可能会简化，仅显示相关指令。您可以在以下 GitHub 存储库中找到所有完整代码： \url{https://github.com /PacktPublishing/Asynchronous-Programming-with-CPP}。
+本书中的一些代码未显示所包含的库，一些函数（甚至是主要函数）可能会简化，仅显示相关指令。可以在以下 GitHub 库中找到所有完整代码： \url{https://github.com/PacktPublishing/Asynchronous-Programming-with-CPP}。
 
-在前述 GitHub 存储库根目录中的 scripts 文件夹下，您可以找到一个名为 install\_compilers.sh 的脚本，该脚本可能有助于在基于 Debian 的 Linux 系统中安装所需的编译器。该脚本已在Ubuntu 22.04 和 24.04 中进行了测试。
+GitHub 库根目录中的 scripts 文件夹下，可以找到一个名为 install\_compilers.sh 的脚本，该脚本可能有助于在基于 Debian 的 Linux 系统中安装所需的编译器。该脚本已在Ubuntu 22.04 和 24.04 中进行了测试。
 
-本章的示例位于 Chapter\_03 文件夹下。所有源代码文件都可以使用 C++20 和 CMake 进行编译，如下所示：
+本章的示例位于 Chapter\_03 文件夹下。所有源代码文件都可以使用 C++20 和 CMake 进行编译：
 
 \begin{shell}
 cmake . && cmake —build .

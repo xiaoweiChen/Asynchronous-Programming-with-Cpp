@@ -1,10 +1,10 @@
-正如我们在本章中已经看到的， Boost.Cobalt 承诺是返回一个值的热切协程，而 Boost.Cobalt 任务是承诺的惰性版本。
+正如本章中已经看到的， Boost.Cobalt promise是返回一个值的立即协程，而 Boost.Cobalt 任务是惰性版本的promise。
 
-我们可以将它们视为不会像生成器那样产生多个值的函数。我们可以反复调用 Promise 来获取多个值，但调用之间不会保留状态（就像生成器一样）。基本上， Promise 是一个可以使用 co\_await 的协程（它也可以使用 co\_return）。
+我们可以将它们视为不会像生成器那样产生多个值的函数，可以反复调用 Promise 来获取多个值，但调用之间不会保留状态（就像生成器一样）。基本上， Promise 是一个可以使用 co\_await 的协程（也可以使用 co\_return）。
 
-Promise 的不同用例包括套接字侦听器接收网络数据包、处理数据包、查询数据库，然后从数据中生成一些结果。一般来说，它们的功能需要异步等待某个结果，然后对该结果执行某些处理（或者可能只是将其返回给调用者） 。
+Promise 的不同用例包括套接字侦听器接收网络数据包、处理数据包、查询数据库，然后从数据中生成一些结果。一般来说，其功能需要异步等待某个结果，然后对该结果执行某些处理（或者可能只是将其返回给调用者） 。
 
-我们的第一个例子是一个简单的承诺，它生成一个随机数（这也可以用生成器来完成）：
+第一个例子是一个简单的promise，可生成一个随机数（也可以用生成器来完成）：
 
 \begin{cpp}
 #include <iostream>
@@ -35,14 +35,14 @@ boost::cobalt::main co_main(int, char*[]) {
 }
 \end{cpp}
 
-在上面的代码中，我们编写了三个协程：
+上面的代码中，编写了三个协程：
 
 \begin{itemize}
 \item
-co\_main：请记住，在 Boost.Cobalt 中， co\_main 是一个协同程序，它调用 co\_return 来返回一个值。
+co\_main：Boost.Cobalt 中， co\_main 是一个协同程序，调用 co\_return 来返回一个值。
 
 \item
-random()：此协程向调用者返回一个随机数。它使用 co\_await 调用 random() 来生成随机数。它异步等待随机数生成。
+random()：此协程向调用者返回一个随机数。使用 co\_await 调用 random() 来生成随机数，异步等待随机数生成。
 
 \item
 random\_number()：该协程在两个值（最小值和最大值）之间生成一个均匀分布的随机数，并将其返回给调用者。 random\_number() 也是一个promise。
@@ -61,7 +61,7 @@ max, int n) {
 }
 \end{cpp}
 
-上述函数返回 std::vector<int> 的承诺。要访问该向量，我们需要调用 get()：
+上述函数返回 std::vector<int> 的promise。要访问该向量，需要调用 get()：
 
 \begin{cpp}
 auto v = random_vector(1, 100, 20);
@@ -71,9 +71,9 @@ for (int n : v.get()) {
 std::cout << std::endl;
 \end{cpp}
 
-上述代码打印了 v 向量的元素。要访问该向量，我们需要调用 v.get()。
+上述代码打印了 v 向量的元素。要访问该向量，需要调用 v.get()。
 
-我们将实现第二个示例来说明承诺和任务的执行有何不同：
+实现第二个示例来说明promise和任务的执行有何不同：
 
 \begin{cpp}
 #include <chrono>
@@ -122,11 +122,11 @@ boost::cobalt::main co_main(int, char*[]){
 }
 \end{cpp}
 
-在这个例子中，我们实现了两个协程：一个 Promise 和一个 Task。正如我们已经说过的， Promise 是 Eager 类型的，它在被调用时立即开始执行。而 Task 是 Lazy 类型的，它在被调用后就会被暂停。
+这个例子中，实现了两个协程：一个 Promise 和一个 Task。Promise 是 Eager 类型的，它在调用时立即开始执行。而 Task 是 Lazy 类型的，在调用后就会暂停。
 
-当我们运行程序时，它会打印所有消息，让我们确切地知道协程是如何执行的。
+运行程序时，会输出所有消息，可确切地知道协程是如何执行的。
 
-co\_main()前三行执行完成后，打印输出如下：
+co\_main()前三行执行完成后，输出如下：
 
 \begin{shell}
 Calling eager_promise...
@@ -135,16 +135,16 @@ Eager promise done
 Promise called, but not yet awaited.
 \end{shell}
 
-从这些消息中，我们知道promise已经被执行了，直到调用co\_return。
+从这些消息中，知道promise已经执行了，直到调用co\_return。
 
-在执行 co\_main() 的接下来三行之后，打印输出有以下新消息：
+执行 co\_main() 的接下来三行之后，输出有以下新消息：
 
 \begin{shell}
 Calling lazy_task...
 Task called, but not yet awaited.
 \end{shell}
 
-在这里，我们看到任务尚未执行。这是一个惰性协程，因此，它在被调用后会立即挂起，并且此协程尚未打印任何消息。
+这里，我们看到任务尚未执行。这是一个惰性协程，在调用后会立即挂起，并且此协程尚未输出任何消息。
 
 再执行三行 co\_main()，程序输出的新消息如下：
 
@@ -153,9 +153,9 @@ Awaiting both results...
 Promise value: 1
 \end{shell}
 
-对承诺的 co\_await 调用给出了其结果（在本例中设置为 1）并且其执行结束。
+对promise的 co\_await 调用给出了其结果（在本例中设置为 1）并且其执行结束。
 
-最后，我们在任务上调用 co\_await，然后它执行并返回其值（在本例中设置为 2）。输出如下：
+最后，在任务上调用 co\_await，然后它执行并返回其值（在本例中设置为 2）。输出如下：
 
 \begin{shell}
 Lazy task started
@@ -165,7 +165,7 @@ Task value: 2
 
 此示例显示了任务如何惰性化并开始暂停，并且仅当调用者对其调用 co\_await 时才恢复执行。
 
-在本节中，我们已经看到，与生成器的情况一样，使用 Boost.Cobalt 编写承诺和任务协程比仅使用纯 C++ 要容易得多。我们不需要编写 C++ 实现协程所需的所有支持代码。我们还看到了任务和承诺之间的主要区别。
+本节中，与生成器的情况一样，使用 Boost.Cobalt 编写promise和任务协程比仅使用纯 C++ 要容易得多，不需要编写 C++ 实现协程所需的所有支持代码。还了解了任务和promise的区别。
 
-在下一节中，我们将研究通道的示例，它是生产者/消费者模型中两个协程之间的通信机制。
+下一节中，将研究通道的示例，它是生产者/消费者模型中两个协程之间的通信机制。
 

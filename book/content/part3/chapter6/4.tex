@@ -1,5 +1,5 @@
 
-现在我们已经了解了一些创建异步程序的新构建块，让我们为一些实际场景构建解决方案。在本节中，我们将学习如何执行以下操作：
+现在已经了解了一些创建异步程序的新构建块，让我们为一些实际场景构建解决方案。本节中，介绍如何执行以下操作：
 
 \begin{itemize}
 \item
@@ -17,13 +17,13 @@
 
 \mySubsubsection{6.4.1.}{取消异步操作}
 
-正如我们之前看到的， future 提供了在等待结果之前检查完成或超时的功能。这可以通过检查 std::future、 wait\_for() 或 wait\_until() 函数返回的 std::future\_status 对象来完成。
+正如之前看到的， future 提供了在等待结果之前检查完成或超时的功能。这可以通过检查 std::future、 wait\_for() 或 wait\_until() 函数返回的 std::future\_status 对象来完成。
 
-通过将 Future 与取消标志（通过 std::atomic\_bool）或超时等机制相结合，我们可以在必要时优雅地终止长时间运行的任务。只需使用 wait\_for() 和 wait\_until() 函数即可实现超时取消。
+通过将 Future 与取消标志（通过 std::atomic\_bool）或超时等机制相结合，可以在必要时优雅地终止长时间运行的任务。只需使用 wait\_for() 和 wait\_until() 函数即可实现超时取消。
 
-使用取消标志或令牌取消任务可以通过传递对定义为 std::atomic\_bool 的取消标志的引用来实现，其中调用者线程将其值设置为 true 以请求取消任务，而工作线程会定期检查此标志以及它是否已设置。如果已设置，它将正常退出并执行任何要完成的清理工作。
+使用取消标志或令牌取消任务可以通过传递对定义为 std::atomic\_bool 的取消标志的引用来实现，其中调用者线程将其值设置为 true 以请求取消任务，而工作线程会定期检查此标志以及它是否已设置。如果已设置，将正常退出并执行要完成的清理工作。
 
-我们首先定义一个长时间运行的任务函数：
+首先定义一个长时间运行的任务函数：
 
 \begin{cpp}
 const int CHECK_PERIOD_MS = 100;
@@ -38,9 +38,9 @@ bool long_running_task(int ms,
 }
 \end{cpp}
 
-long\_running\_task 函数接受一个以毫秒 (ms) 为单位的任务运行周期和一个表示取消标记的原子布尔值 (cancellation\_token) 的引用作为参数。该函数将定期检查取消标记是否设置为 true。当运行周期过去或取消标记设置为 true 时，线程将退出。
+long\_running\_task 函数接受一个以毫秒 (ms) 为单位的任务运行周期和一个表示取消标记的原子布尔值 (cancellation\_token) 的引用作为参数，函数将定期检查取消标记是否设置为 true。当运行周期过去或取消标记设置为 true 时，线程将退出。
 
-在主线程中我们可以使用两个封装好的task对象来执行该函数， task1在线程t1中运行，时长500ms， task2在线程t2中运行，时长1s，二者共享同一个取消标记：
+主线程中可以使用两个封装好的task对象来执行该函数， task1在线程t1中运行，时长500ms， task2在线程t2中运行，时长1s，二者共享同一个取消标记：
 
 \begin{cpp}
 std::atomic_bool cancellation_token{false};
@@ -69,7 +69,7 @@ std::cout << "Task2, waiting for 1 second. Cancelled = "
           << std::boolalpha << result2.get() << "\n";
 \end{cpp}
 
-两个任务启动后，主线程休眠 600 毫秒。当它被唤醒时，它将取消标记设置为 true。此时，任务 1 已经完成，但任务 2 仍在运行。因此，任务 2 被取消。
+两个任务启动后，主线程休眠 600 毫秒。唤醒时，将取消标记设置为 true。此时，任务 1 已经完成，但任务 2 仍在运行。因此，任务 2 取消。
 
 这个解释与获得的输出一致：
 
@@ -80,17 +80,17 @@ Task1, waiting for 500 ms. Cancelled = false
 Task2, waiting for 1 second. Cancelled = true
 \end{shell}
 
-接下来我们看看如何将几个异步计算结果合并到一个 Future 中。
+接下来看看如何将几个异步计算结果合并到一个 Future 中。
 
 \mySubsubsection{6.4.2.}{返回合并结果}
 
-异步编程中的另一种常见方法是使用多个 Promise 和 Future 将复杂任务分解为较小的独立子任务。每个子任务都可以在单独的线程中启动，其结果存储在相应的 Promise 中。然后，主线程可以使用 Future 等待所有子任务完成并合并它们的结果以获得结果。
+异步编程中的另一种常见方法是，使用多个 Promise 和 Future 将复杂任务分解为较小的独立子任务。每个子任务都可以在单独的线程中启动，其结果存储在相应的 Promise 中。然后，主线程可以使用 Future 等待所有子任务完成并合并以获得结果。
 
 这种方法有助于实现多个独立任务的并行处理，从而可以有效利用多个核心来加快计算速度。
 
-让我们看一个模拟值计算和 I/O 操作的任务示例。我们希望该任务返回一个元组，其中包含结果、计算值（int 值）和信息从文件中读取为字符串对象。因此，我们定义 CombineFunc 函数，该函数接受一个 CombineProm Prom 作为参数，该承诺包含一个包含结果类型的元组。
+看一个模拟值计算和 I/O 操作的任务示例。我们希望该任务返回一个元组，其中包含结果、计算值（int 值）和信息从文件中读取为字符串对象。因此，定义 CombineFunc 函数，该函数接受一个 CombineProm Prom 作为参数，该Promise包含一个包含结果类型的元组。
 
-此函数将创建两个线程， computeThread 和 fetchData，以及它们各自的 computeProm 和 fetchProm，以及 computeFut 和 fetchFut：
+此函数将创建两个线程， computeThread 和 fetchData，各自的 computeProm 和 fetchProm，以及 computeFut 和 fetchFut：
 
 \begin{cpp}
 void combineFunc(std::promise<std::tuple<int,
@@ -131,15 +131,15 @@ void combineFunc(std::promise<std::tuple<int,
 }
 \end{cpp}
 
-我们可以看到，两个线程将异步且独立地执行，生成结果并将其存储在各自的 Promise 中。
+可以看到，两个线程将异步且独立地执行，生成结果并将其存储在各自的 Promise 中。
 
-组合承诺的设置方式是，在每个未来上调用 get() 函数，并将它们的结果组合成一个元组，该元组用于通过调用其 set\_value() 函数来设置组合承诺的值，如下所示：
+组合Promise的设置方式是，在每个未来上调用 get() 函数，并将它们的结果组合成一个元组，该元组用于通过调用其 set\_value() 函数来设置组合Promise的值：
 
 \begin{cpp}
 combineProm.set_value({computeFut.get(), fetchFut.get()});
 \end{cpp}
 
-通过使用线程并设置 CombineProm 承诺及其 CombineFut Future，可以像往常一样调用 CombineFunc 任务。在此 Future 上调用 get() 函数将返回一个元组：
+通过使用线程并设置 CombineProm 及其 CombineFut，可以像往常一样调用 CombineFunc 任务。在此 Future 上调用 get() 函数将返回一个元组：
 
 \begin{cpp}
 std::promise<std::tuple<int, std::string>> combineProm;
@@ -161,19 +161,19 @@ Starting dataThread...
 Value [ 42 ] File [ data.txt ]
 \end{shell}
 
-现在，让我们继续学习如何使用承诺和未来创建管道。
+现在，让继续了解如何使用Promise和Future创建管道。
 
 \mySubsubsection{6.4.3.}{链接异步操作}
 
-Promise 和 Future 可以串联在一起，按顺序执行多个异步操作。我们可以创建一个管道，其中一个 Future 的结果将成为下一个操作的 Promise 的输入。这允许组合复杂的异步工作流，其中一个任务的输出将输入到下一个任务中。
+Promise 和 Future 可以串联在一起，按顺序执行多个异步操作。可以创建一个管道，其中一个 Future 的结果将成为下一个操作的 Promise 的输入。这允许组合复杂的异步工作流，其中一个任务的输出将输入到下一个任务中。
 
-此外，我们可以允许在管道中进行分支，并保持某些任务处于关闭状态，直到需要时才执行。这可以通过使用具有延迟执行的 Future 来实现，这在计算成本很高但结果可能并不总是需要的情况下很有用。因此，我们可以使用 Future 异步启动计算，并仅在需要时检索结果。由于只能使用 std::async 创建具有延迟状态的 Future，我们将在下一章中讨论这个问题。
+此外，可以在管道中进行分支，并保持某些任务处于关闭状态，直到需要时才执行。这可以通过使用具有延迟执行的 Future 来实现，这在计算成本很高但结果可能并不总是需要的情况下很有用。因此，可以使用 Future 异步启动计算，并仅在需要时检索结果。由于只能使用 std::async 创建具有延迟状态的 Future，将在下一章中讨论这个问题。
 
-在本节中，我们将重点创建以下任务图：
+本节中，将重点创建以下任务图：
 
 \myGraphic{0.8}{content/part3/chapter6/images/3.png}{图 6.3 – 管道示例}
 
-我们首先定义一个名为 Task 的模板类，该类接受可调用函数作为模板参数，定义要执行的函数。该类还允许我们创建与依赖任务共享未来的任务。这些任务将使用共享的未来等待前置任务通过在相关承诺中调用 set\_value() 来发出完成信号，然后再运行自己的任务：
+首先定义一个名为 Task 的模板类，该类接受可调用函数作为模板参数，定义要执行的函数。该类还创建与依赖任务共享Future的任务。这些任务将使用共享的Future等待前置任务通过在相关Promise中调用 set\_value() 来发出完成信号，然后再运行自己的任务：
 
 \begin{cpp}
 #define sync_cout std::osyncstream(std::cout)
@@ -242,15 +242,15 @@ private:
 };
 \end{cpp}
 
-让我们一步一步描述这个 Task 类是如何实现的 。
+一步一步拆解这个 Task 类是如何实现的 。
 
-有两个构造函数：一个用于初始化与其他任务没有依赖关系的 Task 类型对象，另一个模板化构造函数用于初始化具有可变数量依赖任务的任务。两者都初始化标识符 (id\_)、执行任务时调用的函数 (func\_)、布尔值变量指示任务是否具有依赖项（has\_dependency\_），以及共享未来 fut\_，与依赖于此任务的任务共享。此 fut\_ 未来是从用于发出任务完成信号的 prom\_ 承诺中检索的。模板化构造函数还调用 add\_dependencies 函数转发作为参数传递的未来，这些未来将存储在 deps\_ 向量中。
+有两个构造函数：一个用于初始化与其他任务没有依赖关系的 Task 类型对象，另一个模板化构造函数用于初始化具有可变数量依赖任务的任务。两者都初始化标识符 (id\_)、执行任务时调用的函数 (func\_)、布尔值变量指示任务是否具有依赖项（has\_dependency\_），以及共享Future fut\_，与依赖于此任务的任务共享。fut\_ 是从用于发出任务完成信号的 prom\_ 中检索的，模板化构造函数还调用 add\_dependencies 函数转发作为参数传递的Future，这些Future将存储在 deps\_ 向量数组中。
 
-get\_dependency() 函数仅返回依赖任务用于等待当前任务完成的共享未来。
+get\_dependency() 函数仅返回依赖任务用于等待当前任务完成的共享Future。
 
-最后， operator() 通过调用 wait\_completion() 等待先前任务的完成，这会检查存储在 deps\_ 向量中的每个共享未来是否有效，并通过调用 get() 等待结果准备就绪。一旦所有共享未来都准备就绪，即所有先前任务都已完成，就会调用 func\_ 函数来运行任务，然后通过调用 set\_value() 将 prom\_ promise 设置为就绪，从而触发依赖任务。
+最后， operator() 通过调用 wait\_completion() 等待先前任务的完成，这会检查存储在 deps\_ 向量数组中的每个共享Future是否有效，并通过调用 get() 等待结果准备就绪。当所有共享Future都准备就绪，即所有先前任务都已完成，就会调用 func\_ 函数来运行任务，然后通过调用 set\_value() 将 prom\_ promise 设置为就绪，从而触发依赖任务。
 
-在主线程中，我们定义管道如下，创建如图 6.3 所示的图：
+主线程中，定义的管道如下，创建如图 6.3 所示的图：
 
 \begin{cpp}
 auto sleep1s = []() { std::this_thread::sleep_for(1s); };
@@ -264,7 +264,7 @@ Task task5(5, sleep2s, task3.get_dependency(),
                        task4.get_dependency());
 \end{cpp}
 
-然后，我们需要通过触发所有任务并调用它们的 operator() 来启动管道。由于 task1 没有依赖项，它将立即开始运行。所有其他任务都将等待其前任任务完成其工作：
+然后，需要通过触发所有任务并调用它们的 operator() 来启动管道。由于 task1 没有依赖项，将立即开始运行。所有其他任务都将等待其上游任务完成其工作：
 
 \begin{cpp}
 sync_cout << "Starting the pipeline..." << std::endl;
@@ -275,7 +275,7 @@ task4();
 task5();
 \end{cpp}
 
-最后，我们需要等待管道完成所有任务的执行。我们可以通过简单地等待最后一个任务 task 5 返回的共享 Future 准备就绪来实现这一点：
+最后，需要等待管道完成所有任务的执行。可以通过简单地等待最后一个任务 task 5 返回的共享 Future 准备就绪来实现：
 
 \begin{cpp}
 sync_cout << "Waiting for the pipeline to finish...\n";
@@ -323,18 +323,17 @@ Getting future from task 5
 All done!
 \end{shell}
 
-我们必须注意这种方法可能出现的一些问题。首先，依赖关系图必须是有向无环图 (DAG) ，因此依赖任务之间不能有循环或环路。否则，就会发生死锁，因为任务可能在等待未来发生的任务，但尚未启动。此外，我们需要足够的线程来同时运行所有任务或按顺序启动任务；否则，线程等待尚未启动的任务完成也可能导致死锁。
+必须注意这种方法可能出现的一些问题。首先，依赖关系图必须是有向无环图 (DAG) ，因此依赖任务之间不能有循环或环路。否则，就会发生死锁，因为任务可能在等待未来发生的任务，但尚未启动。此外，需要足够的线程来同时运行所有任务或按顺序启动任务；否则，线程等待尚未启动的任务完成也可能导致死锁。
 
-这种方法的一个常见用例可以在 MapReduce 算法中找到，其中大型数据集在多个节点上并行处理，并且可以使用未来和线程来同时执行 map 和 Reduce 任务，从而实现高效的分布式数据处理。
+这种方法的一个常见用例可以在 MapReduce 算法中找到，其中大型数据集在多个节点上并行处理，并且可以使用Future和线程来同时执行 map 和 Reduce 任务，从而实现高效的分布式数据处理。
 
 \mySubsubsection{6.4.4.}{线程安全的 SPSC 任务队列}
 
-在最后一个例子中，我们将展示如何使用承诺和未来来创建 SPSC 队列。
+最后一个例子中，将展示如何使用Promise和Future来创建 SPSC 队列。
 
-生产者线程会为要添加到队列中的每个项目创建一个承诺。消费者线程会等待从空队列槽中获取的未来。生产者添加完项目后，它会在相应的承诺上设置值，通知等待的消费者。
-这允许在线程之间进行高效的数据交换，同时保持线程安全。
+生产者线程会为要添加到队列中的每个项目创建一个Promise。消费者线程会等待从空队列槽中获取的Future。生产者添加完项目后，它会在相应的Promise上设置值，通知等待的消费者。这允许在线程之间进行高效的数据交换，同时保持线程安全。
 
-我们首先定义线程安全的队列类：
+首先定义线程安全的队列类：
 
 \begin{cpp}
 template <typename T>
@@ -363,17 +362,17 @@ private:
 };
 \end{cpp}
 
-在此示例中，我们仅使用互斥锁在推送或弹出元素时对所有队列数据结构进行互斥。我们希望保持此示例简单，并专注于承诺和未来的交互。更好的方法可能是使用向量或循环数组，并使用互斥锁控制对队列中各个元素的访问。
+此示例中，仅使用互斥锁在推送或弹出元素时对所有队列数据结构进行互斥。我们希望保持此示例简单，并专注于Promise和Future的交互。更好的方法可能是使用向量或循环数组，并使用互斥锁控制对队列中各个元素的访问。
 
-队列还使用条件变量 cond\_var\_，在尝试弹出元素时等待队列是否为空，并在推送元素时通知一个等待线程。通过移动元素，可以将元素移入和移出队列。这是必要的，因为队列将存储未来，正如我们之前所了解的，未来是可移动的，但不可复制。
+队列还使用条件变量 cond\_var\_，在尝试弹出元素时等待队列是否为空，并在推送元素时通知一个等待线程。通过移动元素，可以将元素移入和移出队列。这是必要的，因为队列将存储Future，而Future可移动，但不可复制。
 
-线程安全队列将用于定义一个存储未来的任务队列，如下所示：
+线程安全队列将用于定义一个存储Future的任务队列：
 
 \begin{cpp}
 using TaskQueue = ThreadSafeQueue<std::future<int>>;
 \end{cpp}
 
-然后，我们定义一个函数， producer，它接受对队列的引用，以及将要生成的值 val。此函数仅创建一个承诺，从承诺中检索未来，并将该未来推送到队列中。然后，我们通过让线程等待随机数毫秒来模拟运行并生成值 val 的任务。最后，该值存储在承诺中：
+然后，定义一个函数producer，接受对队列的引用，以及将要生成的值 val。此函数仅创建一个Promise，从Promise中检索Future，并将该Future推送到队列中，通过让线程等待随机数毫秒来模拟运行并生成值 val 的任务。最后，该值存储在Promise中：
 
 \begin{cpp}
 void producer(TaskQueue& queue, int val) {
@@ -388,7 +387,7 @@ void producer(TaskQueue& queue, int val) {
 }
 \end{cpp}
 
-在通信通道的另一端，消费者函数接受对同一队列的引用。同样，我们通过等待随机的毫秒数来模拟在消费者端运行的任务。然后，从队列中弹出一个 Future，并检索其结果，即值、 val 或如果出现错误则为异常：
+通信通道的另一端，消费者函数接受对同一队列的引用。同样，可通过等待随机的毫秒数来模拟在消费者端运行的任务。然后，从队列中弹出一个 Future，并检索其结果：
 
 \begin{cpp}
 void consumer(TaskQueue& queue) {
@@ -405,7 +404,7 @@ void consumer(TaskQueue& queue) {
 }
 \end{cpp}
 
-对于此示例，我们将使用以下常量：
+对于此示例，将使用以下常量：
 
 \begin{cpp}
 const unsigned VALUE_RANGE = 1000;
@@ -413,7 +412,7 @@ const unsigned RESULTS_TO_PRODUCE = 10; // Numbers of items to produce.
 const unsigned MAX_WAIT = 500; // Maximum waiting time (ms) when producing items.
 \end{cpp}
 
-在主线程中，启动了两个线程；第一个线程运行生产者函数producerFunc，将一些未来推送到队列中，而第二个线程运行消费者函数consumerFunc，从队列中使用元素：
+主线程中，启动了两个线程；第一个线程运行生产者函数producerFunc，将一些Future推送到队列中，而第二个线程运行消费者函数consumerFunc，从队列中使用元素：
 
 \begin{cpp}
 TaskQueue queue;
@@ -476,6 +475,6 @@ Consumer: Receiving value
 Result: 862
 \end{shell}
 
-使用像这样的生产者-消费者队列，消费者和生产者是分离的，并且它们的线程异步通信，从而允许生产者和消费者在另一方生成或处理值时做额外的工作。
+使用像这样的生产者-消费者队列，消费者和生产者是分离的，并且它们的线程异步通信，从而允许生产者和消费者在另一方生成或处理值时的其他工作。
 
 

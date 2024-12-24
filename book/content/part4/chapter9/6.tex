@@ -1,23 +1,21 @@
 
-异步操作可能发生的主要灾难性问题之一是，当操作发生时，一些所需的对象已被销毁。
+异步操作可能发生的主要灾难性问题之一是：当操作发生时，一些所需的对象已销毁。
 
-因此，管理对象的生命周期至关重要。
-在 C++ 中，对象的生命周期从构造函数结束时开始，到析构函数开始时结束。
-保持对象活动的常见模式是让对象创建指向自身的共享指针实例，确保只要有指向它的共享指针，该对象就保持有效，这意味着正在进行的异步操作需要该对象。
+因此，管理对象的生命周期至关重要。在 C++ 中，对象的生命周期从构造函数结束时开始，到析构函数开始时结束。保持对象活动的常见模式是让对象创建指向自身的共享指针实例，确保只要有指向它的共享指针，该对象就保持有效。
 
-这种技术称为 shared-from-this，并使用自 C++11 起可用的 std::enable\_shared\_from\_this 模板基类，它提供了对象用来获取指向自身的共享指针的 shared\_from\_this() 方法。
+这种技术称为 shared-from-this，并使用自 C++11 起可用的 std::enable\_shared\_from\_this 模板基类，提供了对象用来获取指向自身的共享指针的 shared\_from\_this() 方法。
 
 \mySubsubsection{9.6.1.}{实现回显服务器——示例}
 
-让我们通过创建一个回显服务器来了解它的工作原理。同时，我们将讨论这项技术，我们还将学习如何使用 Boost.Asio 进行联网。
+通过创建一个回显服务器来了解它的工作原理。同时，将讨论这项技术，还将介绍如何使用 Boost.Asio 进行联网。
 
 通过网络传输数据可能需要很长时间才能完成，并且可能会出现多个错误。这使得网络 I/O 服务成为 Boost.Asio 处理的一个特殊情况。网络 I/O 服务是第一个包含在库中的服务。
 
-Boost.Asio 在业界的主要常见用途是开发网络应用程序，因为它支持互联网协议 TCP、 UDP 和 ICMP。该库还提供了基于 Berkeley Software Distribution (BSD) 套接字 API 的套接字接口，允许使用低级接口开发高效且可扩展的应用程序。
+Boost.Asio 在业界的主要常见用途是开发网络应用程序，因为支持互联网协议 TCP、 UDP 和 ICMP。该库还提供了基于 Berkeley Software Distribution (BSD) 套接字 API 的套接字接口，允许使用底层接口开发高效且可扩展的应用程序。
 
-然而，由于在本书中我们对异步编程感兴趣，因此我们将重点介绍如何使用高级接口实现回显服务器。
+然而，由于在本书对异步编程感兴趣，所以将重点介绍如何使用高级接口实现回显服务器。
 
-回显服务器是一个监听特定地址和端口并写回从该端口读取的所有内容的程序。为此，我们将创建一个 TCP 服务器。
+回显服务器是一个监听特定地址和端口，并写回从该端口读取的所有内容的程序，将创建一个 TCP 服务器。
 
 主程序将简单地创建一个 io\_context 对象，通过传递 io\_context 对象和要监听的端口号来设置 EchoServer 对象，然后调用 io\_context.run() 来启动事件处理循环：
 
@@ -39,7 +37,7 @@ int main() {
 }
 \end{cpp}
 
-当 EchoServer 初始化时，它将开始监听传入的连接。它通过使用 boost::asio::tcp::acceptor 对象来实现这一点。此对象通过其构造函数接受 io\_context 对象（与 I/O 对象一样）和 boost:: asio::tcp::endpoint 对象，该对象指示用于监听的连接协议和端口号。由于 boost::asio::tcp::v4 () 对象用于初始化端点对象，因此 EchoServer 将使用的协议是 IPv4。未向端点构造函数指定 IP 地址，因此端点 IP 地址将是任何地址（对于 IPv4 为 INADDR\_ANY，对于 IPv6 为 in6 addr\_any）。接下来，实现 EchoServer 构造函数的代码如下：
+当 EchoServer 初始化时，将开始监听传入的连接，通过使用 boost::asio::tcp::acceptor 对象来实现。此对象通过其构造函数接受 io\_context 对象（与 I/O 对象一样）和 boost:: asio::tcp::endpoint 对象，该对象指示用于监听的连接协议和端口号。由于 boost::asio::tcp::v4 () 对象用于初始化端点对象，EchoServer 将使用的协议是 IPv4。未向端点构造函数指定 IP 地址，端点 IP 地址将是实际地址（对于 IPv4 为 INADDR\_ANY，对于 IPv6 为 in6 addr\_any）。接下来，实现 EchoServer 构造函数的代码如下：
 
 \begin{cpp}
 using boost::asio::ip::tcp;
@@ -70,11 +68,13 @@ private:
 };
 \end{cpp}
 
-EchoServer 构造函数在设置接受器对象后调用 do\_accept() 函数。 do\_accept() 函数调用 async\_accept() 函数等待传入连接。当客户端连接到服务器时，操作系统通过 io\_context 对象返回连接的套接字 (boost::asio::tcp::socket) 或错误。
+EchoServer 构造函数在设置接受器对象后调用 do\_accept() 函数，其中调用 async\_accept() 函数等待传入连接。当客户端连接到服务器时，操作系统通过 io\_context 对象返回连接的套接字 (boost::asio::tcp::socket) 或错误。
 
-如果没有错误并且建立了连接，则创建 Session 对象的共享指针，将套接字移动到 Session 对象中。然后， Session 对象运行 start() 函数。
+如果没有错误并且建立了连接，则创建 Session 对象的共享指针，将套接字移动到 Session 对象中， Session 对象运行 start() 函数。
 
-Session 对象封装了特定连接的状态，在本例中为 socket\_ 对象和 data\_ 缓冲区。它还使用 do\_read() 和 do\_write() 管理对该缓冲区的异步读取和写入，稍后我们将实现这两个函数。但在此之前，请注意 Session 继承自 std::enable\_shared\_from\_this<Session>，这允许 Session 对象创建指向自身的共享指针，确保只要至少有一个共享指针指向管理该连接的 Session 实例，会话对象就会在需要它们的异步操作的整个生命周期内保持活动状态。此共享指针是在建立连接时在 EchoServer 对象中的 do\_accept() 函数中创建的。以下是 Session 类的实现：
+Session 对象封装了特定连接的状态，本例中为 socket\_ 对象和 data\_ 缓冲区。还使用 do\_read() 和 do\_write() 管理对该缓冲区的异步读取和写入，稍后将实现这两个函数。Session 继承自 std::enable\_shared\_from\_this<Session>，所以 Session 对象创建指向自身的共享指针，确保只要至少有一个共享指针指向管理该连接的 Session 实例，会话对象就会在需要异步操作的整个生命周期内保持活动状态。此共享指针是在建立连接时，在 EchoServer 对象中的 do\_accept() 函数中创建的。
+
+以下是 Session 类的实现：
 
 \begin{cpp}
 class Session
@@ -97,9 +97,9 @@ private:
 };
 \end{cpp}
 
-使用 Session 类，我们可以将管理连接的逻辑与管理服务器的逻辑分开。 EchoServer 只需接受连接并为每个连接创建一个 Session 对象。这样，一个服务器就可以管理多个客户端，保持它们的连接独立并异步管理。
+使用 Session 类，可以将管理连接的逻辑与管理服务器的逻辑分开。 EchoServer 只需接受连接并为每个连接创建一个 Session 对象。这样，一个服务器就可以管理多个客户端，保持连接独立并异步管理。
 
-Session 使用 do\_read() 和 do\_write() 函数来管理该连接的行为。当 Session 启动时，其 start() 函数会调用 do\_read() 函数，如下所示：
+Session 使用 do\_read() 和 do\_write() 函数来管理该连接的行为。当 Session 启动时，其 start() 函数会调用 do\_read() 函数：
 
 \begin{cpp}
 void Session::do_read() {
@@ -117,7 +117,7 @@ void Session::do_read() {
 
 do\_read() 函数创建指向当前会话对象 (self) 的共享指针，并使用套接字的 async\_read\_some() 异步函数将一些数据读入 data\_buffer。如果成功，此操作将返回复制到 data\_buffer 中的数据以及长度变量中读取的字节数。
 
-然后，使用该长度变量调用 do\_write()，使用 async\_write() 函数将 data\_ 缓冲区的内容异步写入套接字。当此异步操作成功时，它会通过再次调用 do\_read() 函数重新启动循环，如下所示：
+然后，使用该长度变量调用 do\_write()，使用 async\_write() 函数将 data\_ 缓冲区的内容异步写入套接字。当此异步操作成功时，通过再次调用 do\_read() 函数重新启动循环：
 
 \begin{cpp}
 void Session::do_write(std::size_t length) {
@@ -134,17 +134,17 @@ void Session::do_write(std::size_t length) {
 }
 \end{cpp}
 
-您可能想知道为什么定义了 self 却没有使用。看起来 self 是多余的，但是当 lambda 函数按值捕获它时，会创建一个副本，从而增加指向 this 对象的共享指针的引用计数，确保在 lambda 处于活动状态时会话不会被破坏。捕获 this 对象是为了在 lambda 函数中提供对其成员的访问。
+想知道为什么定义了 self 却没有使用？看起来 self 是多余的，但是当 lambda 函数按值捕获它时，会创建一个副本，从而增加指向 this 对象的共享指针的引用计数，确保在 lambda 处于活动状态时会话不会破坏。捕获 this 对象是为了在 lambda 函数中提供对其成员的访问。
 
-作为练习，尝试实现一个 stop() 函数来中断 do\_read() 和 do\_write() 之间的循环。一旦所有异步操作完成并且 lambda 函数退出， self 对象将被销毁，并且将不再有其他共享指针指向Session 对象，因此会话将被销毁。
+作为练习，尝试实现一个 stop() 函数来中断 do\_read() 和 do\_write() 之间的循环。当所有异步操作完成并且 lambda 函数退出， self 对象将销毁，并且将不再有其他共享指针指向Session 对象，因此会话将销毁。
 
 这种模式确保在异步操作期间对对象的生命周期进行稳健和安全的管理，避免悬垂指针或早期破坏，从而导致不良行为或崩溃。
 
-要测试此服务器，只需启动服务器，打开一个新终端，然后使用 telnet 命令连接到服务器并向其发送数据。作为参数，我们可以传递本地主机地址，表示我们正在连接到在同一台机器上运行的服务器（IP 地址为 127.0.0.1）和端口（在本例中为 1234）。
+要测试此服务器，只需启动服务器，打开一个新终端，然后使用 telnet 命令连接到服务器并向其发送数据。作为参数，可以传递本地主机地址，表示我们正在连接到在同一台机器上运行的服务器（IP 地址为 127.0.0.1）和端口（在本例中为 1234）。
 
 telnet 命令将启动并显示有关连接的一些信息，并表明我们需要按 Ctrl + \} 键来关闭连接。
 
-输入任何内容并按下 Enter 键将会把输入的行发送到回显服务器，该服务器将监听并发回相同的内容；在这个例子中，它将是 Hello world!。
+输入任何内容并按下 Enter 键将会把输入的行发送到回显服务器，该服务器将监听并发回相同的内容；在这个例子中，是 “Hello world!”。
 
 只需关闭连接并使用 quit 命令退出 telnet 即可退出返回终端：
 
@@ -159,7 +159,7 @@ telnet> quit
 Connection closed.
 \end{shell}
 
-在此示例中，我们已经使用了缓冲区。让我们在下一节中进一步了解它们。
+此示例中，已经使用了缓冲区。让我们在下一节中进一步进行了解。
 
 
 
